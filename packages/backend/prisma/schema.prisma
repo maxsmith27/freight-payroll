@@ -1,0 +1,1292 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ORGANIZATIONAL STRUCTURE
+// ═══════════════════════════════════════════════════════════════════
+
+model Organization {
+  id        String    @id @default(cuid())
+  name      String
+  slug      String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  companies Company[]
+  users     User[]
+
+  @@map("organizations")
+}
+
+model Company {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  name        String
+  tradingName String?
+  abn         String  @unique
+  acn         String?
+
+  // Payroll settings
+  payrollContactName  String?
+  payrollContactEmail String?
+  payrollContactPhone String?
+
+  // Bank details for ABA payment files (stored encrypted)
+  bankBsb         String?
+  bankAccount     String? // encrypted
+  bankAccountName String?
+  bankAbbreviation String? // 3-char bank abbreviation for ABA file
+  bankUserId      String? // 6-char user ID from bank for ABA file
+
+  // STP Phase 2
+  stpSoftwareId   String?
+  stpBranchNumber Int     @default(1)
+
+  // Address
+  addressStreet   String?
+  addressSuburb   String?
+  addressState    AustralianState?
+  addressPostcode String?
+
+  defaultPayFrequency PayFrequency @default(WEEKLY)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  depots         Depot[]
+  employees      Employee[]
+  payRuns        PayRun[]
+  allowanceTypes AllowanceType[]
+  deductionTypes DeductionType[]
+  userAccess     UserCompanyAccess[]
+  rosters        Roster[]
+  vehicles       Vehicle[]
+
+  @@index([organizationId])
+  @@map("companies")
+}
+
+model Depot {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  name String
+  code String
+
+  addressStreet   String?
+  addressSuburb   String?
+  addressState    AustralianState?
+  addressPostcode String?
+
+  managerId String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  employees Employee[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@map("depots")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// USERS AND AUTHENTICATION
+// ═══════════════════════════════════════════════════════════════════
+
+model User {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  email        String    @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+
+  globalRole GlobalRole @default(ORG_USER)
+  isActive   Boolean    @default(true)
+
+  // Optional link to an employee record (employees who also have login access)
+  employeeId String?   @unique
+  employee   Employee? @relation(fields: [employeeId], references: [id])
+
+  lastLoginAt       DateTime?
+  passwordChangedAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  refreshTokens RefreshToken[]
+  companyAccess UserCompanyAccess[]
+
+  @@index([organizationId])
+  @@index([email])
+  @@map("users")
+}
+
+model UserCompanyAccess {
+  id        String      @id @default(cuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id])
+  companyId String
+  company   Company     @relation(fields: [companyId], references: [id])
+  role      CompanyRole
+  depotId   String? // null = access to all depots in this company
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, companyId])
+  @@index([userId])
+  @@index([companyId])
+  @@map("user_company_access")
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  token     String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// EMPLOYEES
+// ═══════════════════════════════════════════════════════════════════
+
+model Employee {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  depotId   String?
+  depot     Depot?   @relation(fields: [depotId], references: [id])
+
+  employeeNumber String
+
+  // Personal
+  firstName     String
+  middleName    String?
+  lastName      String
+  preferredName String?
+  dateOfBirth   DateTime?
+  gender        String?
+
+  // Contact
+  email  String?
+  phone  String?
+  mobile String?
+
+  // Address
+  addressStreet   String?
+  addressSuburb   String?
+  addressState    AustralianState?
+  addressPostcode String?
+  addressCountry  String          @default("AU")
+
+  // Employment
+  employmentType    EmploymentType
+  startDate         DateTime
+  endDate           DateTime? // termination date
+  terminationReason String?
+
+  // Award / classification
+  awardCode             AwardCode?
+  enterpriseAgreementId String? // if covered by EA instead of award
+
+  // Pay settings
+  payFrequency PayFrequency
+
+  // Tax — sensitive fields stored encrypted (AES-256-GCM)
+  taxFileNumber          String? // encrypted
+  taxResidencyStatus     TaxResidencyStatus @default(RESIDENT)
+  claimsTaxFreeThreshold Boolean            @default(true)
+  hasHECSDebt            Boolean            @default(false)
+  hasSFSSDebt            Boolean            @default(false)
+  taxDeclarationDate     DateTime?
+
+  // Superannuation
+  superFundName     String?
+  superFundAbn      String?
+  superMemberNumber String?
+  superFundUsi      String? // Unique superannuation identifier
+
+  // Reporting line
+  reportsToId String?
+  reportsTo   Employee? @relation("ReportsTo", fields: [reportsToId], references: [id])
+
+  // Status
+  isActive Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Relations
+  user                 User?
+  payRates             EmployeePayRate[]
+  awardClassifications EmployeeAwardClassification[]
+  bankAccounts         BankAccount[]
+  emergencyContacts    EmergencyContact[]
+  documents            EmployeeDocument[]
+  timesheets           Timesheet[]
+  leaveBalances        LeaveBalance[]
+  leaveRequests        LeaveRequest[]
+  rosterShifts         RosterShift[]
+  licences             DriverLicence[]
+  accreditations       Accreditation[]
+  medicalCerts         MedicalCertificate[]
+  fatigueRecords       FatigueRecord[]
+  payRunItems          PayRunItem[]
+  auditLogs            AuditLog[]            @relation("EmployeeAuditLogs")
+  subordinates         Employee[]            @relation("ReportsTo")
+  availabilities       EmployeeAvailability[]
+  trainingRecords      TrainingRecord[]
+
+  @@unique([companyId, employeeNumber])
+  @@index([companyId])
+  @@index([depotId])
+  @@index([isActive])
+  @@map("employees")
+}
+
+model EmployeePayRate {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+
+  payType PayType
+
+  // Rate fields — which ones are populated depends on payType
+  hourlyRate         Decimal? @db.Decimal(10, 4)
+  ratePerKm          Decimal? @db.Decimal(10, 4)
+  ratePerLoad        Decimal? @db.Decimal(10, 2)
+  revenuePercentage  Decimal? @db.Decimal(5, 4) // e.g. 0.1500 = 15%
+  annualSalary       Decimal? @db.Decimal(12, 2)
+
+  notes     String?
+  createdBy String
+  createdAt DateTime @default(now())
+
+  @@index([employeeId])
+  @@index([effectiveFrom])
+  @@map("employee_pay_rates")
+}
+
+model EmployeeAwardClassification {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+
+  awardCode           AwardCode
+  classificationLevel AwardClassificationLevel
+  vehicleGrade        VehicleGrade?
+
+  createdBy String
+  createdAt DateTime @default(now())
+
+  @@index([employeeId])
+  @@map("employee_award_classifications")
+}
+
+model BankAccount {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  bsb           String  // encrypted
+  accountNumber String  // encrypted
+  accountName   String
+  isPrimary     Boolean @default(false)
+
+  // Split pay: allocationPercent OR allocationAmount, not both
+  // null = receives full remaining balance
+  allocationPercent Decimal? @db.Decimal(5, 2)
+  allocationAmount  Decimal? @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@map("bank_accounts")
+}
+
+model EmergencyContact {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  name         String
+  relationship String
+  phone        String
+  mobile       String?
+  email        String?
+  isPrimary    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@map("emergency_contacts")
+}
+
+model EmployeeDocument {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  documentType DocumentType
+  fileName     String
+  fileKey      String       // storage path (local) or S3 key
+  fileSize     Int
+  mimeType     String
+
+  description String?
+  expiryDate  DateTime?
+
+  uploadedBy String
+  createdAt  DateTime @default(now())
+
+  @@index([employeeId])
+  @@map("employee_documents")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PAYROLL
+// ═══════════════════════════════════════════════════════════════════
+
+model PayRun {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  payFrequency    PayFrequency
+  periodStartDate DateTime     @db.Date
+  periodEndDate   DateTime     @db.Date
+  payDate         DateTime     @db.Date
+
+  status PayRunStatus @default(DRAFT)
+
+  // Calculated totals — denormalized for performance
+  totalGross         Decimal @default(0) @db.Decimal(12, 2)
+  totalTax           Decimal @default(0) @db.Decimal(12, 2)
+  totalSuper         Decimal @default(0) @db.Decimal(12, 2)
+  totalDeductions    Decimal @default(0) @db.Decimal(12, 2)
+  totalNet           Decimal @default(0) @db.Decimal(12, 2)
+  totalEmployeeCount Int     @default(0)
+
+  // ABA file output
+  abaFileKey     String?
+  abaGeneratedAt DateTime?
+
+  // STP Phase 2
+  stpEventId    String?
+  stpSubmittedAt DateTime?
+  stpStatus     STPStatus?
+
+  notes        String?
+  finalisedAt  DateTime?
+  finalisedBy  String?
+
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items PayRunItem[]
+
+  @@index([companyId])
+  @@index([periodStartDate, periodEndDate])
+  @@index([status])
+  @@map("pay_runs")
+}
+
+model PayRunItem {
+  id         String   @id @default(cuid())
+  payRunId   String
+  payRun     PayRun   @relation(fields: [payRunId], references: [id])
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  // Earnings breakdown (for STP Phase 2 disaggregated reporting)
+  ordinaryEarnings     Decimal @default(0) @db.Decimal(12, 2)
+  overtimeEarnings     Decimal @default(0) @db.Decimal(12, 2)
+  penaltyEarnings      Decimal @default(0) @db.Decimal(12, 2)
+  allowancesTotal      Decimal @default(0) @db.Decimal(12, 2)
+  nonTaxableAllowances Decimal @default(0) @db.Decimal(12, 2)
+  leavePaidTotal       Decimal @default(0) @db.Decimal(12, 2)
+  leavePaidLoading     Decimal @default(0) @db.Decimal(12, 2)
+  grossEarnings        Decimal @default(0) @db.Decimal(12, 2)
+
+  // Deductions
+  preTaxDeductions  Decimal @default(0) @db.Decimal(12, 2) // salary sacrifice etc.
+  taxableIncome     Decimal @default(0) @db.Decimal(12, 2) // gross - pre-tax deductions
+  paygWithholding   Decimal @default(0) @db.Decimal(12, 2)
+  medicareLevy      Decimal @default(0) @db.Decimal(12, 2)
+  postTaxDeductions Decimal @default(0) @db.Decimal(12, 2)
+
+  // Superannuation
+  superGuarantee Decimal @default(0) @db.Decimal(12, 2)
+  voluntarySuper Decimal @default(0) @db.Decimal(12, 2)
+
+  netPay Decimal @default(0) @db.Decimal(12, 2)
+
+  // Year-to-date balances as at this pay run (for STP reporting)
+  ytdGross Decimal @default(0) @db.Decimal(12, 2)
+  ytdTax   Decimal @default(0) @db.Decimal(12, 2)
+  ytdSuper Decimal @default(0) @db.Decimal(12, 2)
+
+  // Hours summary
+  ordinaryHours Decimal @default(0) @db.Decimal(8, 2)
+  overtimeHours Decimal @default(0) @db.Decimal(8, 2)
+
+  // Payslip output
+  payslipFileKey     String?
+  payslipGeneratedAt DateTime?
+
+  status PayRunItemStatus @default(PENDING)
+  notes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  earnings   PayRunEarning[]
+  allowances PayRunAllowanceItem[]
+  deductions PayRunDeductionItem[]
+  leaveItems PayRunLeaveItem[]
+
+  @@unique([payRunId, employeeId])
+  @@index([payRunId])
+  @@index([employeeId])
+  @@map("pay_run_items")
+}
+
+model PayRunEarning {
+  id           String     @id @default(cuid())
+  payRunItemId String
+  payRunItem   PayRunItem @relation(fields: [payRunItemId], references: [id])
+
+  earningType EarningType
+  description String
+  hours       Decimal?    @db.Decimal(8, 2)
+  rate        Decimal?    @db.Decimal(10, 4)
+  units       Decimal?    @db.Decimal(10, 3) // for per-km, per-load
+  amount      Decimal     @db.Decimal(12, 2)
+
+  @@index([payRunItemId])
+  @@map("pay_run_earnings")
+}
+
+model AllowanceType {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  code        String
+  name        String
+  description String?
+
+  isTaxable   Boolean @default(true)
+  stpCategory String? // STP Phase 2 allowance type category
+
+  // ATO reasonable amounts for per-diem type allowances
+  defaultAmount Decimal? @db.Decimal(10, 2)
+  isPerDiem     Boolean  @default(false)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payRunAllowances PayRunAllowanceItem[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@map("allowance_types")
+}
+
+model PayRunAllowanceItem {
+  id              String        @id @default(cuid())
+  payRunItemId    String
+  payRunItem      PayRunItem    @relation(fields: [payRunItemId], references: [id])
+  allowanceTypeId String
+  allowanceType   AllowanceType @relation(fields: [allowanceTypeId], references: [id])
+
+  units  Decimal? @db.Decimal(10, 3) // e.g. number of nights for overnight allowance
+  amount Decimal  @db.Decimal(12, 2)
+
+  @@index([payRunItemId])
+  @@map("pay_run_allowance_items")
+}
+
+model DeductionType {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  code        String
+  name        String
+  description String?
+
+  isPreTax    Boolean @default(false) // pre-tax = salary sacrifice
+  stpCategory String?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payRunDeductions PayRunDeductionItem[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@map("deduction_types")
+}
+
+model PayRunDeductionItem {
+  id              String        @id @default(cuid())
+  payRunItemId    String
+  payRunItem      PayRunItem    @relation(fields: [payRunItemId], references: [id])
+  deductionTypeId String
+  deductionType   DeductionType @relation(fields: [deductionTypeId], references: [id])
+
+  amount Decimal @db.Decimal(12, 2)
+
+  @@index([payRunItemId])
+  @@map("pay_run_deduction_items")
+}
+
+model PayRunLeaveItem {
+  id           String        @id @default(cuid())
+  payRunItemId String
+  payRunItem   PayRunItem    @relation(fields: [payRunItemId], references: [id])
+  leaveRequestId String?
+  leaveRequest   LeaveRequest? @relation(fields: [leaveRequestId], references: [id])
+
+  leaveType     LeaveType
+  hours         Decimal   @db.Decimal(8, 2)
+  amount        Decimal   @db.Decimal(12, 2)
+  loadingAmount Decimal   @default(0) @db.Decimal(12, 2) // 17.5% loading if applicable
+
+  @@index([payRunItemId])
+  @@map("pay_run_leave_items")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TIME AND ATTENDANCE
+// ═══════════════════════════════════════════════════════════════════
+
+model Timesheet {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  weekStartDate DateTime @db.Date
+  weekEndDate   DateTime @db.Date
+
+  status TimesheetStatus @default(DRAFT)
+
+  totalOrdinaryHours Decimal @default(0) @db.Decimal(8, 2)
+  totalOvertimeHours Decimal @default(0) @db.Decimal(8, 2)
+  totalHours         Decimal @default(0) @db.Decimal(8, 2)
+
+  submittedAt DateTime?
+  submittedBy String?
+
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  reviewNotes String?
+
+  approvedBy String?
+  approvedAt DateTime?
+
+  // Linked to pay run item when processed
+  payRunItemId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  entries TimesheetEntry[]
+
+  @@unique([employeeId, weekStartDate])
+  @@index([employeeId])
+  @@index([weekStartDate])
+  @@index([status])
+  @@map("timesheets")
+}
+
+model TimesheetEntry {
+  id          String    @id @default(cuid())
+  timesheetId String
+  timesheet   Timesheet @relation(fields: [timesheetId], references: [id])
+
+  entryDate DateTime @db.Date
+
+  clockIn  DateTime?
+  clockOut DateTime?
+
+  // GPS capture for mobile clock-in
+  clockInLat  Decimal? @db.Decimal(10, 7)
+  clockInLng  Decimal? @db.Decimal(10, 7)
+  clockOutLat Decimal? @db.Decimal(10, 7)
+  clockOutLng Decimal? @db.Decimal(10, 7)
+
+  // Calculated after break deduction
+  ordinaryHours Decimal @default(0) @db.Decimal(8, 2)
+  overtimeHours Decimal @default(0) @db.Decimal(8, 2)
+  totalHours    Decimal @default(0) @db.Decimal(8, 2)
+
+  costCentre    String?
+  depotId       String?
+  notes         String?
+  isManualEntry Boolean @default(false)
+
+  breaks TimesheetBreak[]
+
+  @@index([timesheetId])
+  @@index([entryDate])
+  @@map("timesheet_entries")
+}
+
+model TimesheetBreak {
+  id              String         @id @default(cuid())
+  entryId         String
+  entry           TimesheetEntry @relation(fields: [entryId], references: [id])
+
+  startTime       DateTime
+  endTime         DateTime?
+  durationMinutes Int?
+  breakType       BreakType @default(UNPAID)
+
+  @@index([entryId])
+  @@map("timesheet_breaks")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// LEAVE MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════
+
+model LeaveBalance {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  leaveType LeaveType
+
+  // All in hours
+  accrued  Decimal @default(0) @db.Decimal(10, 2)
+  used     Decimal @default(0) @db.Decimal(10, 2)
+  pending  Decimal @default(0) @db.Decimal(10, 2) // approved but not yet processed in a pay run
+  balance  Decimal @default(0) @db.Decimal(10, 2) // accrued - used - pending
+
+  lastAccrualDate DateTime?
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([employeeId, leaveType])
+  @@index([employeeId])
+  @@map("leave_balances")
+}
+
+model LeaveRequest {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  leaveType LeaveType
+
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+
+  // Calculated
+  totalDays  Decimal @db.Decimal(8, 2)
+  totalHours Decimal @db.Decimal(8, 2)
+
+  reason       String?
+  supportingDoc String? // file key
+
+  status LeaveStatus @default(PENDING)
+
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  reviewNotes String?
+
+  payRunLeaveItems PayRunLeaveItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([startDate, endDate])
+  @@index([status])
+  @@map("leave_requests")
+}
+
+model PublicHoliday {
+  id    String          @id @default(cuid())
+  name  String
+  date  DateTime        @db.Date
+  state AustralianState?
+  year  Int
+
+  @@unique([date, state])
+  @@index([year, state])
+  @@map("public_holidays")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ROSTERING
+// ═══════════════════════════════════════════════════════════════════
+
+model Roster {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+  depotId   String?
+
+  name          String?
+  weekStartDate DateTime @db.Date
+  weekEndDate   DateTime @db.Date
+
+  status RosterStatus @default(DRAFT)
+
+  publishedAt DateTime?
+  publishedBy String?
+
+  estimatedCost Decimal? @db.Decimal(12, 2)
+
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shifts RosterShift[]
+
+  @@index([companyId])
+  @@index([weekStartDate])
+  @@map("rosters")
+}
+
+model RosterShift {
+  id         String    @id @default(cuid())
+  rosterId   String
+  roster     Roster    @relation(fields: [rosterId], references: [id])
+  employeeId String?
+  employee   Employee? @relation(fields: [employeeId], references: [id])
+
+  shiftDate DateTime @db.Date
+  startTime DateTime
+  endTime   DateTime
+
+  vehicleId  String?
+  runCode    String?
+  depotId    String?
+  costCentre String?
+  notes      String?
+
+  // Conflict detection
+  hasConflict     Boolean @default(false)
+  conflictDetails Json?   // array of conflict descriptions
+
+  estimatedCost Decimal? @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([rosterId])
+  @@index([employeeId])
+  @@index([shiftDate])
+  @@map("roster_shifts")
+}
+
+model ShiftTemplate {
+  id        String  @id @default(cuid())
+  companyId String
+  depotId   String?
+
+  name       String
+  startTime  String // HH:MM
+  endTime    String // HH:MM
+  daysOfWeek Int[]  // 0=Sunday, 1=Monday … 6=Saturday
+
+  runCode     String?
+  vehicleType String?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@map("shift_templates")
+}
+
+model EmployeeAvailability {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  fromDate DateTime @db.Date
+  toDate   DateTime @db.Date
+
+  availabilityType AvailabilityType
+  reason           String?
+
+  status     AvailabilityStatus @default(PENDING)
+  reviewedBy String?
+  reviewedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([fromDate, toDate])
+  @@map("employee_availabilities")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// VEHICLES
+// ═══════════════════════════════════════════════════════════════════
+
+model Vehicle {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  rego         String
+  regoState    AustralianState
+  make         String?
+  model        String?
+  year         Int?
+  vehicleGrade VehicleGrade?
+
+  regoExpiry      DateTime? @db.Date
+  nextServiceDate DateTime? @db.Date
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, rego])
+  @@index([companyId])
+  @@map("vehicles")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// COMPLIANCE
+// ═══════════════════════════════════════════════════════════════════
+
+model DriverLicence {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  licenceNumber String
+  licenceState  AustralianState
+  licenceClasses LicenceClass[]
+
+  issueDate  DateTime @db.Date
+  expiryDate DateTime @db.Date
+
+  restrictions String?
+  documentKey  String?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([expiryDate])
+  @@map("driver_licences")
+}
+
+model Accreditation {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  accreditationType AccreditationType
+  certificateNumber String?
+
+  issueDate  DateTime  @db.Date
+  expiryDate DateTime? @db.Date // some don't expire
+
+  issuingBody String?
+  documentKey String?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([expiryDate])
+  @@map("accreditations")
+}
+
+model MedicalCertificate {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  certType      MedicalCertType
+  issuingDoctor String?
+
+  issueDate  DateTime @db.Date
+  expiryDate DateTime @db.Date
+
+  restrictions String?
+  documentKey  String?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([expiryDate])
+  @@map("medical_certificates")
+}
+
+model FatigueRecord {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  recordDate DateTime @db.Date
+
+  workStartTime DateTime
+  workEndTime   DateTime?
+  workMinutes   Int?
+
+  restStartTime DateTime?
+  restEndTime   DateTime?
+  restMinutes   Int?
+
+  locationStart String?
+  locationEnd   String?
+
+  fatigueScheme FatigueScheme @default(STANDARD_HOURS)
+
+  isCompliant  Boolean @default(true)
+  violationType String?
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([recordDate])
+  @@map("fatigue_records")
+}
+
+model TrainingRecord {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  trainingName  String
+  trainingType  String?
+  completedDate DateTime @db.Date
+  expiryDate    DateTime? @db.Date
+  documentKey   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@map("training_records")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AUDIT LOG
+// ═══════════════════════════════════════════════════════════════════
+
+model AuditLog {
+  id String @id @default(cuid())
+
+  organizationId String?
+  companyId      String?
+
+  userId     String?
+  employeeId String?
+  employee   Employee? @relation("EmployeeAuditLogs", fields: [employeeId], references: [id])
+
+  action     AuditAction
+  entityType String // "Employee", "PayRun", "LeaveRequest", etc.
+  entityId   String
+
+  previousValues Json?
+  newValues      Json?
+
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SYSTEM CONFIGURATION
+// ═══════════════════════════════════════════════════════════════════
+
+model SystemConfig {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("system_config")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ENUMS
+// ═══════════════════════════════════════════════════════════════════
+
+enum AustralianState {
+  NSW
+  VIC
+  QLD
+  WA
+  SA
+  TAS
+  ACT
+  NT
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CASUAL
+  CONTRACTOR
+}
+
+enum PayFrequency {
+  WEEKLY
+  FORTNIGHTLY
+  MONTHLY
+}
+
+enum PayType {
+  HOURLY
+  SALARY
+  PER_KM
+  PER_LOAD
+  PERCENTAGE_REVENUE
+  MIXED
+}
+
+enum AwardCode {
+  MA000038
+  MA000039
+}
+
+enum AwardClassificationLevel {
+  GRADE_1
+  GRADE_2
+  GRADE_3
+  GRADE_4
+  GRADE_5
+}
+
+enum VehicleGrade {
+  LIGHT_RIGID
+  MEDIUM_RIGID
+  HEAVY_RIGID
+  ARTICULATED
+  COMBINATION
+}
+
+enum TaxResidencyStatus {
+  RESIDENT
+  FOREIGN_RESIDENT
+  WORKING_HOLIDAY_MAKER
+}
+
+enum GlobalRole {
+  SUPER_ADMIN
+  ORG_USER
+}
+
+enum CompanyRole {
+  COMPANY_ADMIN
+  PAYROLL_MANAGER
+  DEPOT_MANAGER
+  SUPERVISOR
+  EMPLOYEE
+}
+
+enum PayRunStatus {
+  DRAFT
+  PREVIEW
+  APPROVED
+  FINALISED
+  CANCELLED
+}
+
+enum PayRunItemStatus {
+  PENDING
+  ADJUSTED
+  FINALISED
+}
+
+enum STPStatus {
+  PENDING
+  SUBMITTED
+  ACCEPTED
+  REJECTED
+}
+
+enum EarningType {
+  ORDINARY
+  OVERTIME_1_5X
+  OVERTIME_2X
+  PUBLIC_HOLIDAY
+  NIGHT_PENALTY
+  WEEKEND_PENALTY
+  EARLY_MORNING_PENALTY
+  PER_KM
+  PER_LOAD
+  ANNUAL_LEAVE
+  ANNUAL_LEAVE_LOADING
+  PERSONAL_LEAVE
+  LONG_SERVICE_LEAVE
+  TERMINATION_LEAVE
+  OTHER
+}
+
+enum LeaveType {
+  ANNUAL
+  PERSONAL_CARERS
+  COMPASSIONATE
+  COMMUNITY_SERVICE
+  LONG_SERVICE
+  PARENTAL
+  UNPAID
+  PUBLIC_HOLIDAY
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  DECLINED
+  CANCELLED
+  PROCESSED
+}
+
+enum TimesheetStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  PROCESSED
+}
+
+enum BreakType {
+  PAID
+  UNPAID
+  MEAL
+  REST
+}
+
+enum RosterStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AvailabilityType {
+  UNAVAILABLE
+  PREFERRED_OFF
+  AVAILABLE
+}
+
+enum AvailabilityStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
+enum LicenceClass {
+  C
+  LR
+  MR
+  HR
+  HC
+  MC
+}
+
+enum AccreditationType {
+  DANGEROUS_GOODS
+  HEAVY_VEHICLE_MASS_MANAGEMENT
+  HEAVY_VEHICLE_MAINTENANCE
+  BASIC_FATIGUE_MANAGEMENT
+  ADVANCED_FATIGUE_MANAGEMENT
+  FORKLIFT
+  FIRST_AID
+  WHITE_CARD
+  OTHER
+}
+
+enum MedicalCertType {
+  COMMERCIAL_VEHICLE_DRIVER
+  DANGEROUS_GOODS_DRIVER
+  ANNUAL_MEDICAL
+}
+
+enum FatigueScheme {
+  STANDARD_HOURS
+  BASIC_FATIGUE_MANAGEMENT
+  ADVANCED_FATIGUE_MANAGEMENT
+}
+
+enum DocumentType {
+  EMPLOYMENT_CONTRACT
+  LICENCE
+  MEDICAL_CERTIFICATE
+  ACCREDITATION
+  TAX_DECLARATION
+  BANK_DETAILS
+  INDUCTION
+  OTHER
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  PAY_RUN_CREATED
+  PAY_RUN_FINALISED
+  PAY_RUN_CANCELLED
+  LEAVE_APPROVED
+  LEAVE_DECLINED
+  TIMESHEET_APPROVED
+  ROSTER_PUBLISHED
+  EXPORT_GENERATED
+}
