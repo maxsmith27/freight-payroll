@@ -1,46 +1,49 @@
 import { PrismaClient, GlobalRole, CompanyRole, EmploymentType, PayFrequency, PayType, AwardCode, AwardClassificationLevel, TaxResidencyStatus, LeaveType, LicenceClass } from '@prisma/client'
-import bcrypt from 'bcrypt'
+import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
 
 async function main() {
   console.log('Seeding database…')
 
-  // --- Organisation & Company ---
+  // --- Organisation ---
   const org = await prisma.organization.upsert({
-    where: { id: 'seed-org-01' },
+    where: { slug: 'demo-freight-group' },
     update: {},
     create: {
       id: 'seed-org-01',
       name: 'Demo Freight Group',
+      slug: 'demo-freight-group',
     },
   })
 
+  // --- Company ---
   const company = await prisma.company.upsert({
-    where: { id: 'seed-co-01' },
+    where: { abn: '12345678901' },
     update: {},
     create: {
       id: 'seed-co-01',
       organizationId: org.id,
       name: 'Demo Freight Pty Ltd',
       abn: '12345678901',
-      state: 'NSW',
+      addressState: 'NSW',
       defaultPayFrequency: PayFrequency.WEEKLY,
-      fatigueScheme: 'STANDARD',
     },
   })
 
+  // --- Depot ---
   const depot = await prisma.depot.upsert({
-    where: { id: 'seed-depot-01' },
+    where: { companyId_code: { companyId: company.id, code: 'SYD' } },
     update: {},
     create: {
       id: 'seed-depot-01',
       companyId: company.id,
       name: 'Sydney Depot',
-      state: 'NSW',
-      address: '1 Logistics Way',
-      suburb: 'Wetherill Park',
-      postcode: '2164',
+      code: 'SYD',
+      addressState: 'NSW',
+      addressStreet: '1 Logistics Way',
+      addressSuburb: 'Wetherill Park',
+      addressPostcode: '2164',
     },
   })
 
@@ -62,16 +65,12 @@ async function main() {
   await prisma.userCompanyAccess.upsert({
     where: { userId_companyId: { userId: admin.id, companyId: company.id } },
     update: {},
-    create: {
-      userId: admin.id,
-      companyId: company.id,
-      role: CompanyRole.COMPANY_ADMIN,
-    },
+    create: { userId: admin.id, companyId: company.id, role: CompanyRole.COMPANY_ADMIN },
   })
 
-  console.log('  Created admin user: admin@demo.freightpayroll.com.au / Password123!')
+  console.log('  Created admin: admin@demo.freightpayroll.com.au / Password123!')
 
-  // --- Payroll manager user ---
+  // --- Payroll manager ---
   const pmHash = await bcrypt.hash('Password123!', 10)
   const pm = await prisma.user.upsert({
     where: { email: 'payroll@demo.freightpayroll.com.au' },
@@ -89,11 +88,7 @@ async function main() {
   await prisma.userCompanyAccess.upsert({
     where: { userId_companyId: { userId: pm.id, companyId: company.id } },
     update: {},
-    create: {
-      userId: pm.id,
-      companyId: company.id,
-      role: CompanyRole.PAYROLL_MANAGER,
-    },
+    create: { userId: pm.id, companyId: company.id, role: CompanyRole.PAYROLL_MANAGER },
   })
 
   // --- Employees ---
@@ -111,10 +106,10 @@ async function main() {
       classificationLevel: AwardClassificationLevel.GRADE_3,
       payType: PayType.HOURLY,
       baseRate: 29.50,
-      tfn: '123456789',
+      taxFileNumber: '123456789',
       taxResidencyStatus: TaxResidencyStatus.RESIDENT,
       claimsTaxFreeThreshold: true,
-      hasHECS: false,
+      hasHECSDebt: false,
       superFundName: 'AustralianSuper',
       superMemberNumber: 'AS123456',
       licenceClass: LicenceClass.HC,
@@ -132,10 +127,10 @@ async function main() {
       classificationLevel: AwardClassificationLevel.GRADE_4,
       payType: PayType.HOURLY,
       baseRate: 31.80,
-      tfn: '987654321',
+      taxFileNumber: '987654321',
       taxResidencyStatus: TaxResidencyStatus.RESIDENT,
       claimsTaxFreeThreshold: true,
-      hasHECS: true,
+      hasHECSDebt: true,
       superFundName: 'Hostplus',
       superMemberNumber: 'HP789012',
       licenceClass: LicenceClass.MC,
@@ -153,10 +148,10 @@ async function main() {
       classificationLevel: AwardClassificationLevel.GRADE_2,
       payType: PayType.HOURLY,
       baseRate: 27.42,
-      tfn: '456789123',
+      taxFileNumber: '456789123',
       taxResidencyStatus: TaxResidencyStatus.RESIDENT,
       claimsTaxFreeThreshold: false,
-      hasHECS: false,
+      hasHECSDebt: false,
       superFundName: 'Cbus',
       superMemberNumber: 'CB345678',
       licenceClass: LicenceClass.HR,
@@ -164,13 +159,15 @@ async function main() {
   ]
 
   for (const empData of employees) {
-    const { licenceClass, payType, baseRate, ...empFields } = empData
+    const { licenceClass, payType, baseRate, classificationLevel, taxFileNumber, hasHECSDebt, ...empFields } = empData
 
     const emp = await prisma.employee.upsert({
       where: { id: empData.id },
       update: {},
       create: {
         ...empFields,
+        taxFileNumber,
+        hasHECSDebt,
         companyId: company.id,
         depotId: depot.id,
         isActive: true,
@@ -186,23 +183,28 @@ async function main() {
         data: {
           employeeId: emp.id,
           payType,
-          baseRate,
+          hourlyRate: payType === PayType.HOURLY ? baseRate : null,
+          annualSalary: payType === PayType.SALARY ? baseRate : null,
+          ratePerKm: payType === PayType.KILOMETRE ? baseRate : null,
+          ratePerLoad: payType === PayType.LOAD ? baseRate : null,
           effectiveFrom: empFields.startDate,
+          createdBy: admin.id,
         },
       })
     }
 
     // Award classification
-    const existingClassification = await prisma.employeeAwardClassification.findFirst({
+    const existingClass = await prisma.employeeAwardClassification.findFirst({
       where: { employeeId: emp.id, effectiveTo: null },
     })
-    if (!existingClassification && empFields.awardCode && empFields.classificationLevel) {
+    if (!existingClass && empFields.awardCode && classificationLevel) {
       await prisma.employeeAwardClassification.create({
         data: {
           employeeId: emp.id,
           awardCode: empFields.awardCode,
-          classificationLevel: empFields.classificationLevel,
+          classificationLevel,
           effectiveFrom: empFields.startDate,
+          createdBy: admin.id,
         },
       })
     }
@@ -210,14 +212,15 @@ async function main() {
     // Leave balances
     const leaveTypes: LeaveType[] = ['ANNUAL', 'PERSONAL_CARERS', 'COMPASSIONATE', 'LONG_SERVICE']
     for (const leaveType of leaveTypes) {
+      const initialBalance = leaveType === 'ANNUAL' ? 76 : leaveType === 'PERSONAL_CARERS' ? 38 : 0
       await prisma.leaveBalance.upsert({
         where: { employeeId_leaveType: { employeeId: emp.id, leaveType } },
         update: {},
         create: {
           employeeId: emp.id,
           leaveType,
-          balanceHours: leaveType === 'ANNUAL' ? 76 : leaveType === 'PERSONAL_CARERS' ? 38 : 0,
-          accrualRate: leaveType === 'ANNUAL' ? 0.07692 : leaveType === 'PERSONAL_CARERS' ? 0.03846 : 0,
+          accrued: initialBalance,
+          balance: initialBalance,
         },
       })
     }
@@ -228,9 +231,10 @@ async function main() {
       await prisma.driverLicence.create({
         data: {
           employeeId: emp.id,
-          licenceClass,
+          licenceClasses: { set: [licenceClass] },
           licenceNumber: `NSW${empData.id.slice(-3).toUpperCase()}1234`,
-          state: 'NSW',
+          licenceState: 'NSW',
+          issueDate: new Date('2020-01-01'),
           expiryDate: new Date('2026-12-31'),
           isActive: true,
         },
@@ -240,51 +244,47 @@ async function main() {
     console.log(`  Created employee: ${empData.firstName} ${empData.lastName} (${empData.employeeNumber})`)
   }
 
-  // --- Public holidays 2025-2026 (NSW sample) ---
+  // --- Public holidays (NSW 2025–2026) ---
   const publicHolidays = [
-    { name: 'New Year\'s Day', date: new Date('2025-01-01'), state: 'NSW', isNational: true },
-    { name: 'Australia Day', date: new Date('2025-01-27'), state: 'NSW', isNational: true },
-    { name: 'Good Friday', date: new Date('2025-04-18'), state: 'NSW', isNational: true },
-    { name: 'Easter Saturday', date: new Date('2025-04-19'), state: 'NSW', isNational: false },
-    { name: 'Easter Sunday', date: new Date('2025-04-20'), state: 'NSW', isNational: false },
-    { name: 'Easter Monday', date: new Date('2025-04-21'), state: 'NSW', isNational: true },
-    { name: 'Anzac Day', date: new Date('2025-04-25'), state: 'NSW', isNational: true },
-    { name: 'King\'s Birthday', date: new Date('2025-06-09'), state: 'NSW', isNational: false },
-    { name: 'Bank Holiday', date: new Date('2025-08-04'), state: 'NSW', isNational: false },
-    { name: 'Labour Day', date: new Date('2025-10-06'), state: 'NSW', isNational: false },
-    { name: 'Christmas Day', date: new Date('2025-12-25'), state: 'NSW', isNational: true },
-    { name: 'Boxing Day', date: new Date('2025-12-26'), state: 'NSW', isNational: true },
-    { name: 'New Year\'s Day', date: new Date('2026-01-01'), state: 'NSW', isNational: true },
-    { name: 'Australia Day', date: new Date('2026-01-26'), state: 'NSW', isNational: true },
-    { name: 'Good Friday', date: new Date('2026-04-03'), state: 'NSW', isNational: true },
-    { name: 'Easter Saturday', date: new Date('2026-04-04'), state: 'NSW', isNational: false },
-    { name: 'Easter Sunday', date: new Date('2026-04-05'), state: 'NSW', isNational: false },
-    { name: 'Easter Monday', date: new Date('2026-04-06'), state: 'NSW', isNational: true },
-    { name: 'Anzac Day', date: new Date('2026-04-25'), state: 'NSW', isNational: true },
-    { name: 'King\'s Birthday', date: new Date('2026-06-08'), state: 'NSW', isNational: false },
-    { name: 'Christmas Day', date: new Date('2026-12-25'), state: 'NSW', isNational: true },
-    { name: 'Boxing Day', date: new Date('2026-12-28'), state: 'NSW', isNational: true },
+    { name: "New Year's Day",  date: new Date('2025-01-01'), state: 'NSW' },
+    { name: 'Australia Day',   date: new Date('2025-01-27'), state: 'NSW' },
+    { name: 'Good Friday',     date: new Date('2025-04-18'), state: 'NSW' },
+    { name: 'Easter Saturday', date: new Date('2025-04-19'), state: 'NSW' },
+    { name: 'Easter Sunday',   date: new Date('2025-04-20'), state: 'NSW' },
+    { name: 'Easter Monday',   date: new Date('2025-04-21'), state: 'NSW' },
+    { name: 'Anzac Day',       date: new Date('2025-04-25'), state: 'NSW' },
+    { name: "King's Birthday", date: new Date('2025-06-09'), state: 'NSW' },
+    { name: 'Bank Holiday',    date: new Date('2025-08-04'), state: 'NSW' },
+    { name: 'Labour Day',      date: new Date('2025-10-06'), state: 'NSW' },
+    { name: 'Christmas Day',   date: new Date('2025-12-25'), state: 'NSW' },
+    { name: 'Boxing Day',      date: new Date('2025-12-26'), state: 'NSW' },
+    { name: "New Year's Day",  date: new Date('2026-01-01'), state: 'NSW' },
+    { name: 'Australia Day',   date: new Date('2026-01-26'), state: 'NSW' },
+    { name: 'Good Friday',     date: new Date('2026-04-03'), state: 'NSW' },
+    { name: 'Easter Saturday', date: new Date('2026-04-04'), state: 'NSW' },
+    { name: 'Easter Sunday',   date: new Date('2026-04-05'), state: 'NSW' },
+    { name: 'Easter Monday',   date: new Date('2026-04-06'), state: 'NSW' },
+    { name: 'Anzac Day',       date: new Date('2026-04-25'), state: 'NSW' },
+    { name: "King's Birthday", date: new Date('2026-06-08'), state: 'NSW' },
+    { name: 'Christmas Day',   date: new Date('2026-12-25'), state: 'NSW' },
+    { name: 'Boxing Day',      date: new Date('2026-12-28'), state: 'NSW' },
   ]
 
   for (const ph of publicHolidays) {
     await prisma.publicHoliday.upsert({
       where: { date_state: { date: ph.date, state: ph.state } },
       update: {},
-      create: { ...ph, companyId: null },
+      create: { name: ph.name, date: ph.date, state: ph.state, year: ph.date.getFullYear() },
     })
   }
 
   console.log(`  Seeded ${publicHolidays.length} public holidays`)
-
   console.log('\nSeed complete.')
   console.log('\nLogin credentials:')
-  console.log('  Admin: admin@demo.freightpayroll.com.au / Password123!')
+  console.log('  Admin:   admin@demo.freightpayroll.com.au / Password123!')
   console.log('  Payroll: payroll@demo.freightpayroll.com.au / Password123!')
 }
 
 main()
-  .catch(e => {
-    console.error(e)
-    process.exit(1)
-  })
+  .catch(e => { console.error(e); process.exit(1) })
   .finally(() => prisma.$disconnect())
