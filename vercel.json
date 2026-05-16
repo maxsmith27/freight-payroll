@@ -1,7 +1,7 @@
 {
   "version": 2,
   "installCommand": "pnpm install --frozen-lockfile --prod=false",
-  "buildCommand": "pnpm --filter @freight-payroll/backend exec prisma generate --schema=packages/backend/prisma/schema.prisma",
+  "buildCommand": "pnpm --filter @freight-payroll/backend exec prisma generate --schema=./prisma/schema.prisma",
   "functions": {
     "api/index.ts": {
       "maxDuration": 60,
