@@ -53,12 +53,12 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-const listeners: Array<React.Dispatch<Action>> = []
+const listeners: Array<React.Dispatch<React.SetStateAction<State>>> = []
 let memoryState: State = { toasts: [] }
 
 function dispatch(action: Action) {
   memoryState = reducer(memoryState, action)
-  for (const listener of listeners) listener(action)
+  for (const listener of listeners) listener(memoryState)
 }
 
 type Toast = Omit<ToasterToast, 'id'>
