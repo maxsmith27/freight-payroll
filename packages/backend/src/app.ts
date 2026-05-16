@@ -23,21 +23,12 @@ import { reportsRouter } from './modules/reports/reports.router.js'
 
 const app = express()
 
+app.set('trust proxy', 1)
+
 // ─── Security ──────────────────────────────────────────────────────────────
 
 app.use(helmet())
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true)
-      const allowed = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
-        || origin.endsWith('.vercel.app')
-        || origin === config.FRONTEND_URL
-      callback(allowed ? null : new Error('Not allowed by CORS'), allowed)
-    },
-    credentials: true,
-  }),
-)
+app.use(cors({ origin: true, credentials: true }))
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
