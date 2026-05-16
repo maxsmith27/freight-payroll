@@ -28,7 +28,13 @@ const app = express()
 app.use(helmet())
 app.use(
   cors({
-    origin: config.FRONTEND_URL,
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true)
+      const allowed = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+        || origin.endsWith('.vercel.app')
+        || origin === config.FRONTEND_URL
+      callback(allowed ? null : new Error('Not allowed by CORS'), allowed)
+    },
     credentials: true,
   }),
 )
