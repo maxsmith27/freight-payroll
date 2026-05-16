@@ -542,7 +542,7 @@ export async function generateSTPPayload(
       dateOfBirth: item.employee.dateOfBirth?.toISOString().split('T')[0],
       employeeId: item.employee.id,
       startDate: item.employee.startDate.toISOString().split('T')[0],
-      taxScale: mapTaxScale(item.employee.taxResidencyStatus, item.employee.claimsTaxFreeThreshold, !!item.employee.taxFileNumber),
+      taxScale: mapTaxScale(item.employee.taxResidencyStatus, item.employee.claimsTaxFreeThreshold, !!item.employee.taxFileNumber) as import('./generators/stp.generator.js').STPTaxScale,
       claimsTaxFreeThreshold: item.employee.claimsTaxFreeThreshold,
       superFundAbn: item.employee.superFundAbn ?? undefined,
       superFundUsi: item.employee.superFundUsi ?? undefined,

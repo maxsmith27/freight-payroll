@@ -22,7 +22,7 @@ const listQuerySchema = z.object({
 
 employeesRouter.get('/', validateQuery(listQuerySchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { companyId, ...filters } = req.query as z.infer<typeof listQuerySchema>
+    const { companyId, ...filters } = req.query as unknown as z.infer<typeof listQuerySchema>
     const result = await service.listEmployees(companyId, filters)
     res.json({ success: true, ...result })
   } catch (err) { next(err) }

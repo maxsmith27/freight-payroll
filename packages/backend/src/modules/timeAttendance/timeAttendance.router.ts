@@ -43,7 +43,7 @@ const listQuery = z.object({
 
 timeAttendanceRouter.get('/timesheets', validateQuery(listQuery), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { companyId, ...filters } = req.query as z.infer<typeof listQuery>
+    const { companyId, ...filters } = req.query as unknown as z.infer<typeof listQuery>
     const result = await service.listTimesheets(companyId, filters)
     res.json({ success: true, ...result })
   } catch (err) { next(err) }
