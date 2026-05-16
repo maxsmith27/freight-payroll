@@ -1,14 +1,18 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Edit, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Edit, AlertTriangle, UserCheck, UserX, Copy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { api } from '@/lib/api'
+import { api, apiError } from '@/lib/api'
 import { formatCurrency, formatDate, employmentTypeLabel, classificationLabel } from '@/lib/utils'
+import { useToast } from '@/hooks/useToast'
+import { useAuthStore } from '@/store/auth.store'
 
 interface EmployeeDetail {
   id: string
@@ -59,13 +63,40 @@ function LeaveTypeLabel({ type }: { type: string }) {
 export function EmployeeDetailPage() {
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const { activeCompanyId } = useAuthStore()
+  const [portalPassword, setPortalPassword] = useState('')
+  const [generatedPassword, setGeneratedPassword] = useState<string | null>(null)
 
-  const { data: emp, isLoading } = useQuery<EmployeeDetail>({
+  const { data: emp, isLoading } = useQuery<EmployeeDetail & { portalUser?: { email: string; isActive: boolean } | null }>({
     queryKey: ['employee', id],
     queryFn: async () => {
       const { data } = await api.get(`/employees/${id}`)
       return data.data
     },
+  })
+
+  const grantPortalMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/employees/${id}/portal-access?companyId=${activeCompanyId}`, { password: portalPassword }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['employee', id] })
+      setGeneratedPassword(res.data.data.temporaryPassword ?? null)
+      setPortalPassword('')
+      toast({ title: 'Portal access granted' })
+    },
+    onError: err => toast({ title: 'Error', description: apiError(err), variant: 'destructive' }),
+  })
+
+  const revokePortalMutation = useMutation({
+    mutationFn: () =>
+      api.delete(`/employees/${id}/portal-access?companyId=${activeCompanyId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employee', id] })
+      setGeneratedPassword(null)
+      toast({ title: 'Portal access revoked' })
+    },
+    onError: err => toast({ title: 'Error', description: apiError(err), variant: 'destructive' }),
   })
 
   if (isLoading || !emp) {
@@ -125,6 +156,7 @@ export function EmployeeDetailPage() {
             <TabsTrigger value="leave">Leave</TabsTrigger>
             <TabsTrigger value="compliance">Compliance</TabsTrigger>
             <TabsTrigger value="bank">Banking</TabsTrigger>
+            <TabsTrigger value="portal">Portal Access</TabsTrigger>
           </TabsList>
 
           {/* Details tab */}
@@ -341,6 +373,81 @@ export function EmployeeDetailPage() {
                       ))}
                     </tbody>
                   </table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ── Portal Access ── */}
+          <TabsContent value="portal">
+            <Card className="border-0 shadow-sm max-w-lg">
+              <CardHeader>
+                <CardTitle className="text-base">Employee Self-Service Portal</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {emp.portalUser ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-sm">
+                      <UserCheck className="h-4 w-4 text-green-600" />
+                      <span>Portal access is <strong>active</strong></span>
+                    </div>
+                    <Row label="Login email" value={emp.portalUser.email} />
+                    <p className="text-xs text-muted-foreground">
+                      The employee logs in at <strong>/login</strong> and is redirected to the Employee Portal. Share their login email and temporary password directly.
+                    </p>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => revokePortalMutation.mutate()}
+                      disabled={revokePortalMutation.isPending}
+                    >
+                      <UserX className="h-4 w-4 mr-1" />
+                      Revoke portal access
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                      Grant this employee access to the self-service portal so they can log timesheets, kilometres, and view payslips.
+                    </p>
+                    {emp.email ? (
+                      <Row label="Login email will be" value={emp.email} />
+                    ) : (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                        This employee has no email on file. Add an email address in their details first.
+                      </p>
+                    )}
+                    <div>
+                      <Label>Temporary password</Label>
+                      <Input
+                        type="text"
+                        placeholder="Set a temporary password for them"
+                        value={portalPassword}
+                        onChange={e => setPortalPassword(e.target.value)}
+                        className="mt-1"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => grantPortalMutation.mutate()}
+                      disabled={grantPortalMutation.isPending || !emp.email || !portalPassword}
+                    >
+                      <UserCheck className="h-4 w-4 mr-1" />
+                      Grant portal access
+                    </Button>
+
+                    {generatedPassword && (
+                      <div className="rounded bg-green-50 border border-green-200 p-3 text-sm space-y-1">
+                        <p className="font-medium text-green-800">Access granted!</p>
+                        <p className="text-green-700">
+                          Share these credentials with <strong>{emp.firstName}</strong>:
+                        </p>
+                        <p className="text-green-700">Email: <strong>{emp.email}</strong></p>
+                        <p className="text-green-700">Password: <strong>{generatedPassword}</strong></p>
+                        <p className="text-xs text-green-600">They should change their password after first login.</p>
+                      </div>
+                    )}
+                  </div>
                 )}
               </CardContent>
             </Card>

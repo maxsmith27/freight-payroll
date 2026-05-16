@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   Users, DollarSign, Clock, Calendar, Shield, BarChart3,
-  Building2, LogOut, Truck, ChevronDown, Settings,
+  Building2, LogOut, Truck, ChevronDown, Settings, MapPin,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth.store'
@@ -12,6 +12,7 @@ const navItems = [
   { to: '/employees', label: 'Employees', icon: Users },
   { to: '/payroll', label: 'Payroll', icon: DollarSign },
   { to: '/time-attendance', label: 'Time & Attendance', icon: Clock },
+  { to: '/km-log-approvals', label: 'KM Log Approvals', icon: MapPin },
   { to: '/leave', label: 'Leave', icon: Calendar },
   { to: '/roster', label: 'Roster', icon: Calendar },
   { to: '/compliance', label: 'Compliance', icon: Shield },

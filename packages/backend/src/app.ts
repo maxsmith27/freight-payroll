@@ -20,6 +20,7 @@ import { leaveRouter } from './modules/leave/leave.router.js'
 import { rosteringRouter } from './modules/rostering/rostering.router.js'
 import { complianceRouter } from './modules/compliance/compliance.router.js'
 import { reportsRouter } from './modules/reports/reports.router.js'
+import { selfServiceRouter } from './modules/selfService/selfService.router.js'
 
 const app = express()
 
@@ -76,6 +77,7 @@ app.use('/api/v1/leave', requestAuditLogger, leaveRouter)
 app.use('/api/v1/roster', requestAuditLogger, rosteringRouter)
 app.use('/api/v1/compliance', requestAuditLogger, complianceRouter)
 app.use('/api/v1/reports', reportsRouter)
+app.use('/api/v1/self-service', selfServiceRouter)
 
 // ─── 404 handler ────────────────────────────────────────────────────────────
 

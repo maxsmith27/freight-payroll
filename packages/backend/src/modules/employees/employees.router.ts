@@ -155,6 +155,28 @@ employeesRouter.post('/:id/emergency-contacts', validateBody(emergencyContactSch
 
 // ─── Import ─────────────────────────────────────────────────────────────────
 
+// ─── Portal access ────────────────────────────────────────────────────────────
+
+const portalAccessSchema = z.object({ password: z.string().min(8) })
+
+employeesRouter.post('/:id/portal-access', validateBody(portalAccessSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { companyId } = createQuerySchema.parse(req.query)
+    const result = await service.grantPortalAccess(req.params.id, companyId, req.body.password)
+    res.status(201).json({ success: true, data: result })
+  } catch (err) { next(err) }
+})
+
+employeesRouter.delete('/:id/portal-access', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { companyId } = createQuerySchema.parse(req.query)
+    await service.revokePortalAccess(req.params.id, companyId)
+    res.json({ success: true })
+  } catch (err) { next(err) }
+})
+
+// ─── Import ────────────────────────────────────────────────────────────────
+
 employeesRouter.post('/import', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)

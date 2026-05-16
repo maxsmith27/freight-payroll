@@ -33,8 +33,12 @@ export function LoginPage() {
     setError('')
     try {
       const { data } = await api.post('/auth/login', values)
-      setAuth(data.data.user, data.data.tokens)
-      navigate('/dashboard')
+      const user = data.data.user
+      setAuth(user, data.data.tokens)
+      // If the user's only company role is EMPLOYEE, send them to the employee portal
+      const roles = user.companyAccess.map((a: any) => a.role)
+      const isEmployeeOnly = roles.length > 0 && roles.every((r: string) => r === 'EMPLOYEE')
+      navigate(isEmployeeOnly ? '/employee/dashboard' : '/dashboard')
     } catch (err) {
       setError(apiError(err))
     }

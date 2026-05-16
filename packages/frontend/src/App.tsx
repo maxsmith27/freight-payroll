@@ -10,11 +10,18 @@ import { PayRunsPage } from '@/pages/payroll/PayRunsPage'
 import { NewPayRunPage } from '@/pages/payroll/NewPayRunPage'
 import { PayRunDetailPage } from '@/pages/payroll/PayRunDetailPage'
 import { TimesheetsPage } from '@/pages/timeAttendance/TimesheetsPage'
+import { KmLogApprovalsPage } from '@/pages/timeAttendance/KmLogApprovalsPage'
 import { LeavePage } from '@/pages/leave/LeavePage'
 import { RosterPage } from '@/pages/rostering/RosterPage'
 import { CompliancePage } from '@/pages/compliance/CompliancePage'
 import { ReportsPage } from '@/pages/reports/ReportsPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
+import { EmployeePortalLayout } from '@/pages/employee/EmployeePortalLayout'
+import { EmployeeDashboard } from '@/pages/employee/EmployeeDashboard'
+import { EmployeeTimesheets } from '@/pages/employee/EmployeeTimesheets'
+import { EmployeeKmLog } from '@/pages/employee/EmployeeKmLog'
+import { EmployeeLeave } from '@/pages/employee/EmployeeLeave'
+import { EmployeePayslips } from '@/pages/employee/EmployeePayslips'
 
 const router = createBrowserRouter([
   {
@@ -24,6 +31,18 @@ const router = createBrowserRouter([
   {
     path: '/register',
     element: <RegisterPage />,
+  },
+  {
+    path: '/employee',
+    element: <EmployeePortalLayout />,
+    children: [
+      { index: true, element: <Navigate to="/employee/dashboard" replace /> },
+      { path: 'dashboard', element: <EmployeeDashboard /> },
+      { path: 'timesheets', element: <EmployeeTimesheets /> },
+      { path: 'km-log', element: <EmployeeKmLog /> },
+      { path: 'leave', element: <EmployeeLeave /> },
+      { path: 'payslips', element: <EmployeePayslips /> },
+    ],
   },
   {
     path: '/',
@@ -38,6 +57,7 @@ const router = createBrowserRouter([
       { path: 'payroll/new', element: <NewPayRunPage /> },
       { path: 'payroll/:id', element: <PayRunDetailPage /> },
       { path: 'time-attendance', element: <TimesheetsPage /> },
+      { path: 'km-log-approvals', element: <KmLogApprovalsPage /> },
       { path: 'leave', element: <LeavePage /> },
       { path: 'roster', element: <RosterPage /> },
       { path: 'compliance', element: <CompliancePage /> },

@@ -149,6 +149,7 @@ export async function getEmployee(id: string, companyId: string) {
       licences: { where: { isActive: true } },
       accreditations: { where: { isActive: true } },
       medicalCerts: { where: { isActive: true } },
+      user: { select: { email: true, isActive: true } },
     },
   })
 
@@ -158,12 +159,80 @@ export async function getEmployee(id: string, companyId: string) {
   return {
     ...employee,
     taxFileNumber: decryptOptional(employee.taxFileNumber),
+    portalUser: employee.user ? { email: employee.user.email, isActive: employee.user.isActive } : null,
     bankAccounts: employee.bankAccounts.map(ba => ({
       ...ba,
       bsb: decryptOptional(ba.bsb) ?? ba.bsb,
       accountNumber: decryptOptional(ba.accountNumber) ?? ba.accountNumber,
     })),
   }
+}
+
+export async function grantPortalAccess(
+  employeeId: string,
+  companyId: string,
+  password: string,
+) {
+  const employee = await prisma.employee.findFirst({
+    where: { id: employeeId, companyId, deletedAt: null },
+    include: { user: true },
+  })
+  if (!employee) throw new NotFoundError('Employee')
+  if (!employee.email) throw new AppError(400, 'Employee must have an email address to grant portal access')
+  if (employee.user) throw new AppError(409, 'This employee already has portal access')
+
+  const bcrypt = await import('bcryptjs')
+  const passwordHash = await bcrypt.hash(password, 12)
+
+  // Find the organization for this company
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { organizationId: true },
+  })
+  if (!company) throw new NotFoundError('Company')
+
+  // Check if a user with this email already exists in the org
+  const existingUser = await prisma.user.findUnique({ where: { email: employee.email.toLowerCase() } })
+  if (existingUser) throw new AppError(409, 'A user account with this email already exists')
+
+  const user = await prisma.user.create({
+    data: {
+      organizationId: company.organizationId,
+      email: employee.email.toLowerCase(),
+      passwordHash,
+      firstName: employee.firstName,
+      lastName: employee.lastName,
+      globalRole: 'ORG_USER',
+      employeeId: employee.id,
+      companyAccess: {
+        create: {
+          companyId,
+          role: 'EMPLOYEE',
+        },
+      },
+    },
+  })
+
+  return { userId: user.id, email: user.email, temporaryPassword: password }
+}
+
+export async function revokePortalAccess(employeeId: string, companyId: string) {
+  const employee = await prisma.employee.findFirst({
+    where: { id: employeeId, companyId, deletedAt: null },
+    include: { user: true },
+  })
+  if (!employee) throw new NotFoundError('Employee')
+  if (!employee.user) throw new AppError(400, 'This employee does not have portal access')
+
+  // Revoke all refresh tokens and deactivate
+  await prisma.refreshToken.updateMany({
+    where: { userId: employee.user.id },
+    data: { revokedAt: new Date() },
+  })
+  await prisma.user.update({
+    where: { id: employee.user.id },
+    data: { isActive: false },
+  })
 }
 
 export async function createEmployee(

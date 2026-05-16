@@ -257,6 +257,7 @@ model Employee {
   medicalCerts         MedicalCertificate[]
   fatigueRecords       FatigueRecord[]
   payRunItems          PayRunItem[]
+  kmLogs               KmLog[]
   auditLogs            AuditLog[]            @relation("EmployeeAuditLogs")
   subordinates         Employee[]            @relation("ReportsTo")
   availabilities       EmployeeAvailability[]
@@ -890,6 +891,57 @@ model Vehicle {
   @@unique([companyId, rego])
   @@index([companyId])
   @@map("vehicles")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// KM LOGGING (Employee Self-Service)
+// ═══════════════════════════════════════════════════════════════════
+
+model KmLog {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  logDate    DateTime @db.Date
+  kilometres Decimal  @db.Decimal(10, 2)
+
+  // Origin / destination (free text or Maps-resolved)
+  originAddress      String?
+  destinationAddress String?
+
+  // If resolved via Google Maps
+  mapsRouteDescription String?
+
+  vehicleRego String?
+  purpose     String?
+  notes       String?
+
+  // Workflow
+  status     KmLogStatus @default(DRAFT)
+  submittedAt DateTime?
+  approvedAt  DateTime?
+  approvedBy  String?
+  rejectedAt  DateTime?
+  rejectionReason String?
+
+  // Links to pay run once processed
+  payRunItemId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([logDate])
+  @@index([status])
+  @@map("km_logs")
+}
+
+enum KmLogStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  PROCESSED
 }
 
 // ═══════════════════════════════════════════════════════════════════
