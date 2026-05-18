@@ -355,8 +355,9 @@ export async function addAwardClassification(
     data: { effectiveTo: effectiveFrom },
   })
 
+  const { effectiveFrom: _ef, ...restData } = data
   return prisma.employeeAwardClassification.create({
-    data: { employeeId, effectiveFrom, ...data, createdBy },
+    data: { employeeId, effectiveFrom, ...restData, createdBy },
   })
 }
 
@@ -475,6 +476,9 @@ export async function importEmployees(
           payFrequency: row.payFrequency as any,
           awardCode: row.awardCode as any,
           depotId,
+          taxResidencyStatus: 'RESIDENT' as const,
+          claimsTaxFreeThreshold: true,
+          hasHECSDebt: false,
         },
         createdBy,
       )

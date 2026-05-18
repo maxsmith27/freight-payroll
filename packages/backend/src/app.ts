@@ -4,6 +4,8 @@ import helmet from 'helmet'
 import compression from 'compression'
 import morgan from 'morgan'
 import rateLimit from 'express-rate-limit'
+import { createReadStream } from 'node:fs'
+import path from 'node:path'
 
 import { config } from './config/index.js'
 import { errorHandler } from './middleware/error.middleware.js'
@@ -78,6 +80,18 @@ app.use('/api/v1/roster', requestAuditLogger, rosteringRouter)
 app.use('/api/v1/compliance', requestAuditLogger, complianceRouter)
 app.use('/api/v1/reports', reportsRouter)
 app.use('/api/v1/self-service', selfServiceRouter)
+
+// ─── Local file serving (dev only) ──────────────────────────────────────────
+// In production, files are served via S3 pre-signed URLs; this route is never reached.
+if (config.STORAGE_DRIVER === 'local') {
+  app.get('/files/*', (req: express.Request, res: express.Response) => {
+    const key = (req.params as unknown as Record<string, string>)[0]
+    const filePath = path.join(config.STORAGE_LOCAL_PATH, key)
+    const stream = createReadStream(filePath)
+    stream.on('error', () => res.status(404).json({ error: 'File not found' }))
+    stream.pipe(res)
+  })
+}
 
 // ─── 404 handler ────────────────────────────────────────────────────────────
 

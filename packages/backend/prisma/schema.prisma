@@ -8,19 +8,28 @@ datasource db {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// ORGANIZATIONAL STRUCTURE
+// ORGANISATIONAL STRUCTURE
 // ═══════════════════════════════════════════════════════════════════
 
 model Organization {
   id        String    @id @default(cuid())
   name      String
   slug      String    @unique
+
+  // Billing contact (separate from admin user)
+  billingEmail String?
+  billingName  String?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  companies Company[]
-  users     User[]
+  companies    Company[]
+  users        User[]
+  subscription OrganizationSubscription?
+  apiKeys      ApiKey[]
+  webhooks     WebhookEndpoint[]
+  integrations IntegrationToken[]
 
   @@map("organizations")
 }
@@ -35,17 +44,23 @@ model Company {
   abn         String  @unique
   acn         String?
 
+  // Branding
+  logoKey  String? // S3 key for company logo (used on payslips, portal)
+
+  // Localisation
+  timeZone String @default("Australia/Sydney")
+
   // Payroll settings
   payrollContactName  String?
   payrollContactEmail String?
   payrollContactPhone String?
 
   // Bank details for ABA payment files (stored encrypted)
-  bankBsb         String?
-  bankAccount     String? // encrypted
-  bankAccountName String?
-  bankAbbreviation String? // 3-char bank abbreviation for ABA file
-  bankUserId      String? // 6-char user ID from bank for ABA file
+  bankBsb          String? // encrypted
+  bankAccount      String? // encrypted
+  bankAccountName  String?
+  bankAbbreviation String? // 3-char bank abbreviation for ABA
+  bankUserId       String? // 6-char user ID from bank for ABA
 
   // STP Phase 2
   stpSoftwareId   String?
@@ -57,20 +72,32 @@ model Company {
   addressState    AustralianState?
   addressPostcode String?
 
+  // Workers compensation
+  workCoverPolicyNumber String?
+  workCoverInsurer      String?
+
+  // Payroll tax (state-level)
+  payrollTaxRegistered Boolean          @default(false)
+  payrollTaxState      AustralianState?
+
   defaultPayFrequency PayFrequency @default(WEEKLY)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  depots         Depot[]
-  employees      Employee[]
-  payRuns        PayRun[]
-  allowanceTypes AllowanceType[]
-  deductionTypes DeductionType[]
-  userAccess     UserCompanyAccess[]
-  rosters        Roster[]
-  vehicles       Vehicle[]
+  depots                Depot[]
+  employees             Employee[]
+  payRuns               PayRun[]
+  allowanceTypes        AllowanceType[]
+  deductionTypes        DeductionType[]
+  userAccess            UserCompanyAccess[]
+  rosters               Roster[]
+  vehicles              Vehicle[]
+  subcontractors        Subcontractor[]
+  enterpriseAgreements  EnterpriseAgreement[]
+  expenseClaims         ExpenseClaim[]
+  workplaceIncidents    WorkplaceIncident[]
 
   @@index([organizationId])
   @@map("companies")
@@ -119,12 +146,16 @@ model User {
   globalRole GlobalRole @default(ORG_USER)
   isActive   Boolean    @default(true)
 
-  // Optional link to an employee record (employees who also have login access)
+  // Link to an employee record for self-service portal users
   employeeId String?   @unique
   employee   Employee? @relation(fields: [employeeId], references: [id])
 
   lastLoginAt       DateTime?
   passwordChangedAt DateTime?
+
+  // MFA (future)
+  mfaEnabled  Boolean @default(false)
+  mfaSecret   String? // encrypted TOTP secret
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -203,15 +234,20 @@ model Employee {
   addressPostcode String?
   addressCountry  String          @default("AU")
 
-  // Employment
-  employmentType    EmploymentType
-  startDate         DateTime
-  endDate           DateTime? // termination date
+  // Role and employment
+  position       String?        // job title / position description
+  employmentType EmploymentType
+  startDate      DateTime
+  endDate        DateTime? // termination date
   terminationReason String?
+
+  // Probation and notice
+  probationEndDate  DateTime?
+  noticePeriodWeeks Int?
 
   // Award / classification
   awardCode             AwardCode?
-  enterpriseAgreementId String? // if covered by EA instead of award
+  enterpriseAgreementId String? // FK to EnterpriseAgreement
 
   // Pay settings
   payFrequency PayFrequency
@@ -228,7 +264,13 @@ model Employee {
   superFundName     String?
   superFundAbn      String?
   superMemberNumber String?
-  superFundUsi      String? // Unique superannuation identifier
+  superFundUsi      String?
+
+  // Workers compensation
+  workCoverClassCode String?
+
+  // Onboarding
+  inductionCompletedAt DateTime?
 
   // Reporting line
   reportsToId String?
@@ -258,8 +300,11 @@ model Employee {
   fatigueRecords       FatigueRecord[]
   payRunItems          PayRunItem[]
   kmLogs               KmLog[]
-  auditLogs            AuditLog[]            @relation("EmployeeAuditLogs")
-  subordinates         Employee[]            @relation("ReportsTo")
+  expenseClaims        ExpenseClaim[]
+  workersCompClaims    WorkersCompClaim[]
+  workplaceIncidents   WorkplaceIncident[] @relation("IncidentInvolvedEmployee")
+  auditLogs            AuditLog[]          @relation("EmployeeAuditLogs")
+  subordinates         Employee[]          @relation("ReportsTo")
   availabilities       EmployeeAvailability[]
   trainingRecords      TrainingRecord[]
 
@@ -280,12 +325,11 @@ model EmployeePayRate {
 
   payType PayType
 
-  // Rate fields — which ones are populated depends on payType
-  hourlyRate         Decimal? @db.Decimal(10, 4)
-  ratePerKm          Decimal? @db.Decimal(10, 4)
-  ratePerLoad        Decimal? @db.Decimal(10, 2)
-  revenuePercentage  Decimal? @db.Decimal(5, 4) // e.g. 0.1500 = 15%
-  annualSalary       Decimal? @db.Decimal(12, 2)
+  hourlyRate        Decimal? @db.Decimal(10, 4)
+  ratePerKm         Decimal? @db.Decimal(10, 4)
+  ratePerLoad       Decimal? @db.Decimal(10, 2)
+  revenuePercentage Decimal? @db.Decimal(5, 4)
+  annualSalary      Decimal? @db.Decimal(12, 2)
 
   notes     String?
   createdBy String
@@ -326,7 +370,6 @@ model BankAccount {
   isPrimary     Boolean @default(false)
 
   // Split pay: allocationPercent OR allocationAmount, not both
-  // null = receives full remaining balance
   allocationPercent Decimal? @db.Decimal(5, 2)
   allocationAmount  Decimal? @db.Decimal(10, 2)
 
@@ -361,11 +404,12 @@ model EmployeeDocument {
   employeeId String
   employee   Employee @relation(fields: [employeeId], references: [id])
 
-  documentType DocumentType
-  fileName     String
-  fileKey      String       // storage path (local) or S3 key
-  fileSize     Int
-  mimeType     String
+  documentType    DocumentType
+  storageProvider StorageProvider @default(LOCAL)
+  fileName        String
+  fileKey         String // local path or S3 key
+  fileSize        Int
+  mimeType        String
 
   description String?
   expiryDate  DateTime?
@@ -375,6 +419,29 @@ model EmployeeDocument {
 
   @@index([employeeId])
   @@map("employee_documents")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ENTERPRISE AGREEMENTS
+// ═══════════════════════════════════════════════════════════════════
+
+model EnterpriseAgreement {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  name             String
+  fwoAeaNumber     String? // Fair Work AEA agreement number
+  commencementDate DateTime  @db.Date
+  expiryDate       DateTime? @db.Date
+  documentKey      String? // S3 key for the EA document
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@map("enterprise_agreements")
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -393,6 +460,9 @@ model PayRun {
 
   status PayRunStatus @default(DRAFT)
 
+  // Superannuation rate locked at time of run — critical for historical accuracy
+  sgRate Decimal @default(0.12) @db.Decimal(5, 4)
+
   // Calculated totals — denormalized for performance
   totalGross         Decimal @default(0) @db.Decimal(12, 2)
   totalTax           Decimal @default(0) @db.Decimal(12, 2)
@@ -406,13 +476,13 @@ model PayRun {
   abaGeneratedAt DateTime?
 
   // STP Phase 2
-  stpEventId    String?
+  stpEventId     String?
   stpSubmittedAt DateTime?
-  stpStatus     STPStatus?
+  stpStatus      STPStatus?
 
-  notes        String?
-  finalisedAt  DateTime?
-  finalisedBy  String?
+  notes       String?
+  finalisedAt DateTime?
+  finalisedBy String?
 
   createdBy String
   createdAt DateTime @default(now())
@@ -433,7 +503,7 @@ model PayRunItem {
   employeeId String
   employee   Employee @relation(fields: [employeeId], references: [id])
 
-  // Earnings breakdown (for STP Phase 2 disaggregated reporting)
+  // Earnings breakdown (STP Phase 2 disaggregated reporting)
   ordinaryEarnings     Decimal @default(0) @db.Decimal(12, 2)
   overtimeEarnings     Decimal @default(0) @db.Decimal(12, 2)
   penaltyEarnings      Decimal @default(0) @db.Decimal(12, 2)
@@ -444,8 +514,8 @@ model PayRunItem {
   grossEarnings        Decimal @default(0) @db.Decimal(12, 2)
 
   // Deductions
-  preTaxDeductions  Decimal @default(0) @db.Decimal(12, 2) // salary sacrifice etc.
-  taxableIncome     Decimal @default(0) @db.Decimal(12, 2) // gross - pre-tax deductions
+  preTaxDeductions  Decimal @default(0) @db.Decimal(12, 2)
+  taxableIncome     Decimal @default(0) @db.Decimal(12, 2)
   paygWithholding   Decimal @default(0) @db.Decimal(12, 2)
   medicareLevy      Decimal @default(0) @db.Decimal(12, 2)
   postTaxDeductions Decimal @default(0) @db.Decimal(12, 2)
@@ -456,7 +526,7 @@ model PayRunItem {
 
   netPay Decimal @default(0) @db.Decimal(12, 2)
 
-  // Year-to-date balances as at this pay run (for STP reporting)
+  // YTD balances as at this pay run (for STP reporting)
   ytdGross Decimal @default(0) @db.Decimal(12, 2)
   ytdTax   Decimal @default(0) @db.Decimal(12, 2)
   ytdSuper Decimal @default(0) @db.Decimal(12, 2)
@@ -493,10 +563,10 @@ model PayRunEarning {
 
   earningType EarningType
   description String
-  hours       Decimal?    @db.Decimal(8, 2)
-  rate        Decimal?    @db.Decimal(10, 4)
-  units       Decimal?    @db.Decimal(10, 3) // for per-km, per-load
-  amount      Decimal     @db.Decimal(12, 2)
+  hours       Decimal? @db.Decimal(8, 2)
+  rate        Decimal? @db.Decimal(10, 4)
+  units       Decimal? @db.Decimal(10, 3)
+  amount      Decimal  @db.Decimal(12, 2)
 
   @@index([payRunItemId])
   @@map("pay_run_earnings")
@@ -512,9 +582,8 @@ model AllowanceType {
   description String?
 
   isTaxable   Boolean @default(true)
-  stpCategory String? // STP Phase 2 allowance type category
+  stpCategory String?
 
-  // ATO reasonable amounts for per-diem type allowances
   defaultAmount Decimal? @db.Decimal(10, 2)
   isPerDiem     Boolean  @default(false)
 
@@ -536,7 +605,7 @@ model PayRunAllowanceItem {
   allowanceTypeId String
   allowanceType   AllowanceType @relation(fields: [allowanceTypeId], references: [id])
 
-  units  Decimal? @db.Decimal(10, 3) // e.g. number of nights for overnight allowance
+  units  Decimal? @db.Decimal(10, 3)
   amount Decimal  @db.Decimal(12, 2)
 
   @@index([payRunItemId])
@@ -552,7 +621,7 @@ model DeductionType {
   name        String
   description String?
 
-  isPreTax    Boolean @default(false) // pre-tax = salary sacrifice
+  isPreTax    Boolean @default(false)
   stpCategory String?
 
   isActive  Boolean  @default(true)
@@ -580,19 +649,148 @@ model PayRunDeductionItem {
 }
 
 model PayRunLeaveItem {
-  id           String        @id @default(cuid())
-  payRunItemId String
-  payRunItem   PayRunItem    @relation(fields: [payRunItemId], references: [id])
+  id             String        @id @default(cuid())
+  payRunItemId   String
+  payRunItem     PayRunItem    @relation(fields: [payRunItemId], references: [id])
   leaveRequestId String?
   leaveRequest   LeaveRequest? @relation(fields: [leaveRequestId], references: [id])
 
   leaveType     LeaveType
-  hours         Decimal   @db.Decimal(8, 2)
-  amount        Decimal   @db.Decimal(12, 2)
-  loadingAmount Decimal   @default(0) @db.Decimal(12, 2) // 17.5% loading if applicable
+  hours         Decimal @db.Decimal(8, 2)
+  amount        Decimal @db.Decimal(12, 2)
+  loadingAmount Decimal @default(0) @db.Decimal(12, 2)
 
   @@index([payRunItemId])
   @@map("pay_run_leave_items")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AWARD RATE CONFIGURATION
+// All rates stored with effective dates — historical calculations
+// must use the rate that was current at the time of the pay run.
+// Verify all figures against the Fair Work Ombudsman and ATO
+// official sources before seeding.
+// ═══════════════════════════════════════════════════════════════════
+
+model AwardBaseRate {
+  id                  String                   @id @default(cuid())
+  award               AwardCode
+  classificationLevel AwardClassificationLevel
+  vehicleGrade        VehicleGrade?
+
+  weeklyRate Decimal @db.Decimal(10, 4) // ordinary-time weekly rate
+  hourlyRate Decimal @db.Decimal(10, 4) // weeklyRate / 38
+
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+
+  source    String? // e.g. "FWC Annual Wage Review 2025"
+  createdAt DateTime @default(now())
+
+  @@unique([award, classificationLevel, vehicleGrade, effectiveFrom])
+  @@index([award, classificationLevel])
+  @@index([effectiveFrom])
+  @@map("award_base_rates")
+}
+
+model AwardAllowanceRate {
+  id    String     @id @default(cuid())
+  award AwardCode? // null = applies to both awards
+
+  code        String // e.g. "TRUCK_ALLOWANCE", "MEAL_ALLOWANCE"
+  name        String
+  description String?
+
+  rateType    AllowanceRateType
+  amount      Decimal           @db.Decimal(10, 4)
+  isTaxable   Boolean           @default(true)
+  stpCategory String? // STP Phase 2 category code
+
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+
+  source    String?
+  createdAt DateTime @default(now())
+
+  @@unique([code, effectiveFrom])
+  @@index([award])
+  @@index([effectiveFrom])
+  @@map("award_allowance_rates")
+}
+
+model AwardPenaltyRate {
+  id          String          @id @default(cuid())
+  award       AwardCode
+  penaltyType PenaltyRateType
+  multiplier  Decimal         @db.Decimal(5, 4) // e.g. 1.5000 = time-and-a-half
+
+  // null = applies to all classification levels for this award
+  classificationLevel AwardClassificationLevel?
+
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+
+  source    String?
+  createdAt DateTime @default(now())
+
+  @@unique([award, penaltyType, classificationLevel, effectiveFrom])
+  @@index([award, penaltyType])
+  @@index([effectiveFrom])
+  @@map("award_penalty_rates")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TAX CONFIGURATION
+// Verify all figures against ATO NAT 3539 (Statement of Formulas)
+// and NAT 1008 (weekly tax tables) before seeding each financial year.
+// ═══════════════════════════════════════════════════════════════════
+
+model PaygTaxBracket {
+  id String @id @default(cuid())
+
+  financialYear          String             // e.g. "2025-26"
+  taxResidencyStatus     TaxResidencyStatus
+  claimsTaxFreeThreshold Boolean
+  hasHECS                Boolean            @default(false)
+  payFrequency           PayFrequency
+
+  // Annual income bracket — for withholding formula (NAT 3539)
+  annualEarningsFrom Decimal  @db.Decimal(10, 2)
+  annualEarningsTo   Decimal? @db.Decimal(10, 2) // null = no upper limit
+
+  // ATO withholding formula coefficients: withholding = (a × annualised) - b
+  // Coefficients from NAT 3539 column a and b
+  coefficientA Decimal @db.Decimal(14, 7)
+  coefficientB Decimal @db.Decimal(14, 7)
+
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+
+  source    String?
+  createdAt DateTime @default(now())
+
+  @@index([financialYear, taxResidencyStatus, claimsTaxFreeThreshold, hasHECS, payFrequency])
+  @@index([effectiveFrom])
+  @@map("payg_tax_brackets")
+}
+
+model SuperannuationRate {
+  id            String @id @default(cuid())
+  financialYear String // e.g. "2025-26"
+
+  rate           Decimal @db.Decimal(5, 4) // e.g. 0.1200 = 12%
+  effectiveFrom  DateTime @db.Date
+  effectiveTo    DateTime? @db.Date
+
+  // Maximum super contribution base (quarterly) — ATO published
+  maxContributionBaseQuarterly Decimal? @db.Decimal(12, 2)
+
+  source    String?
+  createdAt DateTime @default(now())
+
+  @@unique([effectiveFrom])
+  @@index([effectiveFrom])
+  @@map("superannuation_rates")
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -623,7 +821,6 @@ model Timesheet {
   approvedBy String?
   approvedAt DateTime?
 
-  // Linked to pay run item when processed
   payRunItemId String? @unique
 
   createdAt DateTime @default(now())
@@ -654,7 +851,6 @@ model TimesheetEntry {
   clockOutLat Decimal? @db.Decimal(10, 7)
   clockOutLng Decimal? @db.Decimal(10, 7)
 
-  // Calculated after break deduction
   ordinaryHours Decimal @default(0) @db.Decimal(8, 2)
   overtimeHours Decimal @default(0) @db.Decimal(8, 2)
   totalHours    Decimal @default(0) @db.Decimal(8, 2)
@@ -672,9 +868,9 @@ model TimesheetEntry {
 }
 
 model TimesheetBreak {
-  id              String         @id @default(cuid())
-  entryId         String
-  entry           TimesheetEntry @relation(fields: [entryId], references: [id])
+  id      String         @id @default(cuid())
+  entryId String
+  entry   TimesheetEntry @relation(fields: [entryId], references: [id])
 
   startTime       DateTime
   endTime         DateTime?
@@ -683,6 +879,84 @@ model TimesheetBreak {
 
   @@index([entryId])
   @@map("timesheet_breaks")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// KM LOGGING
+// ═══════════════════════════════════════════════════════════════════
+
+model KmLog {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  logDate    DateTime @db.Date
+  kilometres Decimal  @db.Decimal(10, 2)
+
+  originAddress        String?
+  destinationAddress   String?
+  mapsRouteDescription String?
+
+  vehicleRego String?
+  purpose     String?
+  notes       String?
+
+  status          KmLogStatus @default(DRAFT)
+  submittedAt     DateTime?
+  approvedAt      DateTime?
+  approvedBy      String?
+  rejectedAt      DateTime?
+  rejectionReason String?
+
+  payRunItemId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([logDate])
+  @@index([status])
+  @@map("km_logs")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// EXPENSE CLAIMS
+// ═══════════════════════════════════════════════════════════════════
+
+model ExpenseClaim {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id])
+
+  claimDate   DateTime    @db.Date
+  expenseType ExpenseType
+
+  description String
+  amount      Decimal  @db.Decimal(10, 2)
+  gstAmount   Decimal? @db.Decimal(10, 2)
+  isTaxable   Boolean  @default(false) // reimbursements generally not taxable
+
+  receiptKey String? // S3 key for receipt
+
+  status          ExpenseStatus @default(DRAFT)
+  submittedAt     DateTime?
+  approvedAt      DateTime?
+  approvedBy      String?
+  rejectedAt      DateTime?
+  rejectionReason String?
+
+  payRunItemId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([companyId])
+  @@index([claimDate])
+  @@index([status])
+  @@map("expense_claims")
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -696,11 +970,10 @@ model LeaveBalance {
 
   leaveType LeaveType
 
-  // All in hours
-  accrued  Decimal @default(0) @db.Decimal(10, 2)
-  used     Decimal @default(0) @db.Decimal(10, 2)
-  pending  Decimal @default(0) @db.Decimal(10, 2) // approved but not yet processed in a pay run
-  balance  Decimal @default(0) @db.Decimal(10, 2) // accrued - used - pending
+  accrued Decimal @default(0) @db.Decimal(10, 2)
+  used    Decimal @default(0) @db.Decimal(10, 2)
+  pending Decimal @default(0) @db.Decimal(10, 2)
+  balance Decimal @default(0) @db.Decimal(10, 2)
 
   lastAccrualDate DateTime?
 
@@ -721,12 +994,11 @@ model LeaveRequest {
   startDate DateTime @db.Date
   endDate   DateTime @db.Date
 
-  // Calculated
   totalDays  Decimal @db.Decimal(8, 2)
   totalHours Decimal @db.Decimal(8, 2)
 
-  reason       String?
-  supportingDoc String? // file key
+  reason        String?
+  supportingDoc String? // S3 key
 
   status LeaveStatus @default(PENDING)
 
@@ -746,10 +1018,10 @@ model LeaveRequest {
 }
 
 model PublicHoliday {
-  id    String          @id @default(cuid())
+  id    String           @id @default(cuid())
   name  String
-  date  DateTime        @db.Date
-  state AustralianState?
+  date  DateTime         @db.Date
+  state AustralianState? // null = national
   year  Int
 
   @@unique([date, state])
@@ -801,14 +1073,14 @@ model RosterShift {
   endTime   DateTime
 
   vehicleId  String?
+  vehicle    Vehicle? @relation(fields: [vehicleId], references: [id])
   runCode    String?
   depotId    String?
   costCentre String?
   notes      String?
 
-  // Conflict detection
   hasConflict     Boolean @default(false)
-  conflictDetails Json?   // array of conflict descriptions
+  conflictDetails Json?
 
   estimatedCost Decimal? @db.Decimal(10, 2)
 
@@ -829,7 +1101,7 @@ model ShiftTemplate {
   name       String
   startTime  String // HH:MM
   endTime    String // HH:MM
-  daysOfWeek Int[]  // 0=Sunday, 1=Monday … 6=Saturday
+  daysOfWeek Int[]  // 0=Sunday … 6=Saturday
 
   runCode     String?
   vehicleType String?
@@ -866,7 +1138,7 @@ model EmployeeAvailability {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// VEHICLES
+// VEHICLES AND FLEET
 // ═══════════════════════════════════════════════════════════════════
 
 model Vehicle {
@@ -880,72 +1152,301 @@ model Vehicle {
   model        String?
   year         Int?
   vehicleGrade VehicleGrade?
+  colour       String?
 
+  // Physical specs
+  grossVehicleMass Int? // kg
+  tare             Int? // kg (unladen weight)
+
+  // Registration and compliance
   regoExpiry      DateTime? @db.Date
   nextServiceDate DateTime? @db.Date
+
+  // Insurance
+  insurancePolicyNumber String?
+  insuranceExpiry       DateTime? @db.Date
+
+  // Telematics
+  gpsDeviceId String?
 
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  serviceRecords VehicleServiceRecord[]
+  incidents      VehicleIncident[]
+  rosterShifts   RosterShift[]
 
   @@unique([companyId, rego])
   @@index([companyId])
   @@map("vehicles")
 }
 
+model VehicleServiceRecord {
+  id        String  @id @default(cuid())
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id])
+
+  serviceDate  DateTime @db.Date
+  serviceType  String // e.g. "Annual Service", "RMS Inspection", "Tyre Replacement"
+  odometerKm   Int?
+  costCents    Int? // in cents to avoid decimal issues
+  providerName String?
+  notes        String?
+  documentKey  String? // S3 key for service invoice
+
+  nextServiceDate DateTime? @db.Date
+  nextServiceOdoKm Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([vehicleId])
+  @@index([serviceDate])
+  @@map("vehicle_service_records")
+}
+
+model VehicleIncident {
+  id        String  @id @default(cuid())
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id])
+
+  incidentDate DateTime
+  incidentType String // ACCIDENT, NEAR_MISS, BREAKDOWN, THEFT, DAMAGE
+
+  description            String
+  driverEmployeeId       String?
+  location               String?
+  policeReportNumber     String?
+  insuranceClaimNumber   String?
+  estimatedDamageCents   Int?
+  documentKeys           String[] // S3 keys for photos/reports
+
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([vehicleId])
+  @@index([incidentDate])
+  @@map("vehicle_incidents")
+}
+
 // ═══════════════════════════════════════════════════════════════════
-// KM LOGGING (Employee Self-Service)
+// SUBCONTRACTORS (Owner-Drivers)
 // ═══════════════════════════════════════════════════════════════════
 
-model KmLog {
+model Subcontractor {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  entityType SubcontractorEntityType
+
+  // Individual fields
+  firstName String?
+  lastName  String?
+
+  // Company/trust fields
+  businessName String?
+  tradingName  String?
+
+  abn String
+
+  // Contact
+  email  String?
+  phone  String?
+  mobile String?
+
+  // Address
+  addressStreet   String?
+  addressSuburb   String?
+  addressState    AustralianState?
+  addressPostcode String?
+
+  // Payment bank account (encrypted)
+  bankBsb     String? // encrypted
+  bankAccount String? // encrypted
+  bankName    String?
+
+  // Voluntary PAYG withholding (if they elect to have tax withheld)
+  voluntaryWithholdingRate Decimal? @db.Decimal(5, 4)
+
+  notes     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  contracts SubcontractorContract[]
+  vehicles  SubcontractorVehicle[]
+  payments  SubcontractorPayment[]
+
+  @@unique([companyId, abn])
+  @@index([companyId])
+  @@map("subcontractors")
+}
+
+model SubcontractorContract {
+  id              String        @id @default(cuid())
+  subcontractorId String
+  subcontractor   Subcontractor @relation(fields: [subcontractorId], references: [id])
+
+  contractType    SubcontractorContractType
+  ratePerKm       Decimal? @db.Decimal(10, 4)
+  ratePerLoad     Decimal? @db.Decimal(10, 2)
+  fixedWeeklyRate Decimal? @db.Decimal(12, 2)
+
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+  documentKey   String? // S3 key for signed contract
+
+  createdAt DateTime @default(now())
+
+  @@index([subcontractorId])
+  @@index([effectiveFrom])
+  @@map("subcontractor_contracts")
+}
+
+model SubcontractorVehicle {
+  id              String        @id @default(cuid())
+  subcontractorId String
+  subcontractor   Subcontractor @relation(fields: [subcontractorId], references: [id])
+
+  rego         String
+  regoState    AustralianState
+  make         String?
+  model        String?
+  year         Int?
+  vehicleGrade VehicleGrade?
+
+  createdAt DateTime @default(now())
+
+  @@index([subcontractorId])
+  @@map("subcontractor_vehicles")
+}
+
+model SubcontractorPayment {
+  id              String        @id @default(cuid())
+  subcontractorId String
+  subcontractor   Subcontractor @relation(fields: [subcontractorId], references: [id])
+  companyId       String
+
+  periodStartDate DateTime @db.Date
+  periodEndDate   DateTime @db.Date
+  paymentDate     DateTime @db.Date
+
+  // Totals
+  totalKilometres Decimal? @db.Decimal(10, 2)
+  totalLoads      Int?
+
+  subtotal       Decimal @db.Decimal(12, 2)
+  withholdingTax Decimal @default(0) @db.Decimal(12, 2)
+  gst            Decimal @default(0) @db.Decimal(12, 2)
+  netPayment     Decimal @db.Decimal(12, 2)
+
+  status        SubcontractorPaymentStatus @default(DRAFT)
+  invoiceNumber String?
+  abaFileKey    String?
+
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines SubcontractorPaymentLine[]
+
+  @@index([subcontractorId])
+  @@index([companyId])
+  @@index([periodStartDate])
+  @@map("subcontractor_payments")
+}
+
+model SubcontractorPaymentLine {
+  id        String               @id @default(cuid())
+  paymentId String
+  payment   SubcontractorPayment @relation(fields: [paymentId], references: [id])
+
+  description String
+  quantity    Decimal  @db.Decimal(10, 3)
+  unitRate    Decimal  @db.Decimal(10, 4)
+  amount      Decimal  @db.Decimal(12, 2)
+  runDate     DateTime? @db.Date
+  runCode     String?
+
+  @@index([paymentId])
+  @@map("subcontractor_payment_lines")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WORKPLACE SAFETY
+// ═══════════════════════════════════════════════════════════════════
+
+model WorkplaceIncident {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  incidentDate     DateTime
+  incidentType     IncidentType
+  description      String
+  location         String?
+
+  involvedEmployeeId String?
+  involvedEmployee   Employee? @relation("IncidentInvolvedEmployee", fields: [involvedEmployeeId], references: [id])
+
+  injuryDescription  String?
+  treatmentProvided  String?
+  lostTimeInjury     Boolean   @default(false)
+  returnToWorkDate   DateTime? @db.Date
+
+  // Regulatory notifications
+  reportedToSafeworkAt DateTime?
+  safeworkRefNumber    String?
+  notifiableIncident   Boolean @default(false)
+
+  documentKeys String[] // S3 keys for incident photos, forms
+
+  workersCompClaimId String?
+
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([incidentDate])
+  @@map("workplace_incidents")
+}
+
+model WorkersCompClaim {
   id         String   @id @default(cuid())
   employeeId String
   employee   Employee @relation(fields: [employeeId], references: [id])
+  companyId  String
 
-  logDate    DateTime @db.Date
-  kilometres Decimal  @db.Decimal(10, 2)
+  claimNumber String?
+  insurer     String?
 
-  // Origin / destination (free text or Maps-resolved)
-  originAddress      String?
-  destinationAddress String?
+  injuryDate DateTime @db.Date
+  injuryType String
+  bodyPart   String?
 
-  // If resolved via Google Maps
-  mapsRouteDescription String?
+  status ClaimStatus @default(OPEN)
 
-  vehicleRego String?
-  purpose     String?
-  notes       String?
+  // Return to work
+  rtpDate              DateTime? @db.Date // return to pre-injury duties date
+  weeklyBenefitCents   Int?
 
-  // Workflow
-  status     KmLogStatus @default(DRAFT)
-  submittedAt DateTime?
-  approvedAt  DateTime?
-  approvedBy  String?
-  rejectedAt  DateTime?
-  rejectionReason String?
-
-  // Links to pay run once processed
-  payRunItemId String?
+  documentKeys String[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([employeeId])
-  @@index([logDate])
-  @@index([status])
-  @@map("km_logs")
-}
-
-enum KmLogStatus {
-  DRAFT
-  SUBMITTED
-  APPROVED
-  REJECTED
-  PROCESSED
+  @@index([companyId])
+  @@map("workers_comp_claims")
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// COMPLIANCE
+// COMPLIANCE (Licences, Accreditations, Fatigue, Training)
 // ═══════════════════════════════════════════════════════════════════
 
 model DriverLicence {
@@ -953,15 +1454,15 @@ model DriverLicence {
   employeeId String
   employee   Employee @relation(fields: [employeeId], references: [id])
 
-  licenceNumber String
-  licenceState  AustralianState
+  licenceNumber  String
+  licenceState   AustralianState
   licenceClasses LicenceClass[]
 
   issueDate  DateTime @db.Date
   expiryDate DateTime @db.Date
 
   restrictions String?
-  documentKey  String?
+  documentKey  String? // S3 key
 
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -981,10 +1482,10 @@ model Accreditation {
   certificateNumber String?
 
   issueDate  DateTime  @db.Date
-  expiryDate DateTime? @db.Date // some don't expire
+  expiryDate DateTime? @db.Date
 
   issuingBody String?
-  documentKey String?
+  documentKey String? // S3 key
 
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -1007,7 +1508,7 @@ model MedicalCertificate {
   expiryDate DateTime @db.Date
 
   restrictions String?
-  documentKey  String?
+  documentKey  String? // S3 key
 
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -1038,7 +1539,7 @@ model FatigueRecord {
 
   fatigueScheme FatigueScheme @default(STANDARD_HOURS)
 
-  isCompliant  Boolean @default(true)
+  isCompliant   Boolean @default(true)
   violationType String?
 
   notes     String?
@@ -1057,15 +1558,190 @@ model TrainingRecord {
 
   trainingName  String
   trainingType  String?
-  completedDate DateTime @db.Date
+  completedDate DateTime  @db.Date
   expiryDate    DateTime? @db.Date
-  documentKey   String?
+  documentKey   String? // S3 key
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([employeeId])
   @@map("training_records")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SAAS SUBSCRIPTION
+// ═══════════════════════════════════════════════════════════════════
+
+model SubscriptionPlan {
+  id   String @id @default(cuid())
+  code String @unique // STARTER, GROWTH, ENTERPRISE
+
+  name             String
+  maxEmployees     Int? // null = unlimited
+  maxCompanies     Int?
+  maxDepots        Int?
+
+  // Feature gates
+  hasApiAccess        Boolean @default(false)
+  hasWebhooks         Boolean @default(false)
+  hasSso              Boolean @default(false)
+  hasWhiteLabel       Boolean @default(false)
+  hasAdvancedReports  Boolean @default(false)
+  hasSubcontractors   Boolean @default(true)
+
+  monthlyPriceCents Int // AUD cents
+  annualPriceCents  Int // total annual price in AUD cents
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions OrganizationSubscription[]
+
+  @@map("subscription_plans")
+}
+
+model OrganizationSubscription {
+  id             String             @id @default(cuid())
+  organizationId String             @unique
+  organization   Organization       @relation(fields: [organizationId], references: [id])
+  planId         String
+  plan           SubscriptionPlan   @relation(fields: [planId], references: [id])
+
+  status       SubscriptionStatus @default(TRIALING)
+  billingCycle BillingCycle       @default(MONTHLY)
+
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  trialEndsAt        DateTime?
+  cancelledAt        DateTime?
+
+  // Payment processor IDs (Stripe)
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@map("organization_subscriptions")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// INTEGRATIONS (Xero, MYOB, Deputy, etc.)
+// ═══════════════════════════════════════════════════════════════════
+
+model IntegrationToken {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  provider     IntegrationProvider
+  accessToken  String // encrypted
+  refreshToken String? // encrypted
+  scope        String?
+  expiresAt    DateTime?
+
+  // Provider-specific metadata
+  tenantId   String? // Xero tenant ID
+  tenantName String? // Xero org name
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, provider])
+  @@index([organizationId])
+  @@map("integration_tokens")
+}
+
+model IntegrationMapping {
+  id             String  @id @default(cuid())
+  organizationId String
+  companyId      String?
+
+  provider     IntegrationProvider
+  mappingType  String // e.g. "PAYG_ACCOUNT", "SUPER_LIABILITY", "WAGES_EXPENSE"
+  localId      String // our ID or code
+  externalId   String // their account/object ID
+  externalName String? // human-readable label from their system
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, provider, mappingType, localId])
+  @@index([organizationId, provider])
+  @@map("integration_mappings")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// API KEYS AND WEBHOOKS
+// ═══════════════════════════════════════════════════════════════════
+
+model ApiKey {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  name      String
+  keyHash   String   @unique // SHA-256 of the full key — never store raw
+  keyPrefix String   // first 12 chars for display, e.g. "fpk_live_abc1"
+
+  scopes String[] // e.g. ["employees:read", "payroll:read"]
+
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+
+  createdBy String
+  createdAt DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([keyHash])
+  @@map("api_keys")
+}
+
+model WebhookEndpoint {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  url    String
+  secret String // HMAC-SHA256 signing secret (encrypted at rest)
+
+  events String[] // e.g. ["pay_run.finalised", "employee.created"]
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deliveries WebhookDelivery[]
+
+  @@index([organizationId])
+  @@map("webhook_endpoints")
+}
+
+model WebhookDelivery {
+  id         String          @id @default(cuid())
+  endpointId String
+  endpoint   WebhookEndpoint @relation(fields: [endpointId], references: [id])
+
+  event   String
+  payload Json
+
+  statusCode   Int?
+  responseBody String? // truncated to 2000 chars
+
+  attemptCount Int       @default(0)
+  succeededAt  DateTime?
+  nextRetryAt  DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([endpointId])
+  @@index([createdAt])
+  @@map("webhook_deliveries")
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1083,7 +1759,7 @@ model AuditLog {
   employee   Employee? @relation("EmployeeAuditLogs", fields: [employeeId], references: [id])
 
   action     AuditAction
-  entityType String // "Employee", "PayRun", "LeaveRequest", etc.
+  entityType String
   entityId   String
 
   previousValues Json?
@@ -1163,6 +1839,11 @@ enum AwardClassificationLevel {
   GRADE_3
   GRADE_4
   GRADE_5
+  GRADE_6
+  GRADE_7
+  GRADE_8
+  GRADE_9
+  GRADE_10
 }
 
 enum VehicleGrade {
@@ -1221,6 +1902,7 @@ enum EarningType {
   NIGHT_PENALTY
   WEEKEND_PENALTY
   EARLY_MORNING_PENALTY
+  AFTERNOON_PENALTY
   PER_KM
   PER_LOAD
   ANNUAL_LEAVE
@@ -1283,6 +1965,117 @@ enum AvailabilityStatus {
   DECLINED
 }
 
+enum KmLogStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  PROCESSED
+}
+
+enum ExpenseType {
+  FUEL
+  TOLL
+  PARKING
+  ACCOMMODATION
+  MEAL_ALLOWANCE
+  PHONE
+  UNIFORM
+  TOOLS
+  OTHER
+}
+
+enum ExpenseStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  PROCESSED
+}
+
+enum AllowanceRateType {
+  FIXED       // flat amount per period
+  PER_KM      // amount per kilometre
+  PER_DAY     // amount per day worked
+  PER_HOUR    // amount per hour worked
+  PER_WEEK    // amount per week
+  PER_NIGHT   // amount per night away from home base
+}
+
+enum PenaltyRateType {
+  SATURDAY
+  SUNDAY
+  PUBLIC_HOLIDAY
+  OVERTIME_1_5X   // first 2–3 hours overtime
+  OVERTIME_2X     // subsequent overtime hours
+  NIGHT_SHIFT     // worked between defined night hours
+  EARLY_MORNING   // worked before defined morning start
+  AFTERNOON_SHIFT
+  ROSTERED_DAY_OFF
+}
+
+enum SubcontractorEntityType {
+  INDIVIDUAL // sole trader / owner-driver
+  COMPANY    // Pty Ltd, trust, partnership
+}
+
+enum SubcontractorContractType {
+  RATE_PER_KM
+  RATE_PER_LOAD
+  FIXED_WEEKLY
+  MIXED
+}
+
+enum SubcontractorPaymentStatus {
+  DRAFT
+  PENDING
+  PROCESSED
+  CANCELLED
+}
+
+enum IncidentType {
+  INJURY
+  NEAR_MISS
+  PROPERTY_DAMAGE
+  ENVIRONMENTAL
+  SECURITY
+  MEDICAL
+}
+
+enum ClaimStatus {
+  OPEN
+  ACCEPTED
+  DISPUTED
+  CLOSED
+  WITHDRAWN
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+enum BillingCycle {
+  MONTHLY
+  ANNUAL
+}
+
+enum IntegrationProvider {
+  XERO
+  MYOB
+  QUICKBOOKS
+  DEPUTY
+  KEYPAY
+}
+
+enum StorageProvider {
+  LOCAL
+  S3
+}
+
 enum LicenceClass {
   C
   LR
@@ -1324,6 +2117,9 @@ enum DocumentType {
   TAX_DECLARATION
   BANK_DETAILS
   INDUCTION
+  ENTERPRISE_AGREEMENT
+  SUBCONTRACTOR_CONTRACT
+  INCIDENT_REPORT
   OTHER
 }
 
@@ -1341,4 +2137,12 @@ enum AuditAction {
   TIMESHEET_APPROVED
   ROSTER_PUBLISHED
   EXPORT_GENERATED
+  EXPENSE_APPROVED
+  EXPENSE_REJECTED
+  INCIDENT_REPORTED
+  API_KEY_CREATED
+  API_KEY_REVOKED
+  PORTAL_ACCESS_GRANTED
+  PORTAL_ACCESS_REVOKED
+  SUBCONTRACTOR_PAYMENT_PROCESSED
 }

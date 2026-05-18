@@ -212,13 +212,15 @@ async function generateTokens(session: UserSession): Promise<AuthTokens> {
       companyAccess: session.companyAccess,
     },
     config.JWT_ACCESS_SECRET,
-    { expiresIn: config.JWT_ACCESS_EXPIRES_IN as string },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    { expiresIn: config.JWT_ACCESS_EXPIRES_IN as any },
   )
 
   const refreshToken = jwt.sign(
     { sub: session.id, jti },
     config.JWT_REFRESH_SECRET,
-    { expiresIn: config.JWT_REFRESH_EXPIRES_IN as string },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    { expiresIn: config.JWT_REFRESH_EXPIRES_IN as any },
   )
 
   // Persist refresh token for rotation validation

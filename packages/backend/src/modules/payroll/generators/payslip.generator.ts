@@ -15,7 +15,8 @@
 // ─────────────────────────────────────────────────────────────────
 
 import PdfPrinter from 'pdfmake'
-import type { TDocumentDefinitions, Content } from 'pdfmake/interfaces'
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+import type { TDocumentDefinitions, Content, TableCell } from 'pdfmake/interfaces'
 import { formatCurrency, formatDate } from '@freight-payroll/shared'
 import type { PayslipData } from '@freight-payroll/shared'
 
@@ -145,7 +146,7 @@ function buildEarningsSection(data: PayslipData): Content {
               { text: e.rate ? formatCurrency(e.rate) : '', alignment: 'right' },
               { text: formatCurrency(e.amount), alignment: 'right' },
             ]),
-          ],
+          ] as TableCell[][],
         },
         layout: {
           hLineWidth: () => 0.5,
@@ -174,7 +175,7 @@ function buildAllowancesSection(data: PayslipData): Content {
               { text: '', alignment: 'right' },
               { text: formatCurrency(a.amount), alignment: 'right' },
             ]),
-          ],
+          ] as TableCell[][],
         },
         layout: {
           hLineWidth: () => 0.5,
@@ -248,7 +249,7 @@ function buildSummarySection(data: PayslipData): Content {
                   { text: 'Superannuation', fontSize: 8, color: '#6b7280' },
                   { text: formatCurrency(data.summary.superGuarantee), fontSize: 8, alignment: 'right', color: '#6b7280' },
                 ],
-              ],
+              ] as TableCell[][],
             },
             layout: 'noBorders',
           },

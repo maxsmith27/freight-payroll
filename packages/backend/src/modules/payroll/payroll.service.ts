@@ -3,9 +3,8 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { z } from 'zod'
-import path from 'path'
-import fs from 'fs/promises'
 import prisma from '../../lib/prisma.js'
+import { uploadFile } from '../../lib/storage.js'
 import { NotFoundError, AppError } from '../../middleware/error.middleware.js'
 import { decrypt, decryptOptional } from '../../lib/crypto.js'
 import { calculateTax } from './engines/tax.engine.js'
@@ -14,7 +13,6 @@ import { generateABAFile } from './generators/aba.generator.js'
 import { generatePayslipPDF } from './generators/payslip.generator.js'
 import { generateSTPPayEventPayload } from './generators/stp.generator.js'
 import { PENALTY_RATES, formatCurrency, getFinancialYearStart } from '@freight-payroll/shared'
-import { config } from '../../config/index.js'
 import type { PayslipData } from '@freight-payroll/shared'
 import type { Prisma } from '@prisma/client'
 
@@ -387,19 +385,15 @@ export async function generateABA(payRunId: string, companyId: string): Promise<
     payments,
   )
 
-  // Save file
-  const uploadsDir = config.STORAGE_LOCAL_PATH
-  await fs.mkdir(uploadsDir, { recursive: true })
-  const fileName = `payrun-${payRunId}-${Date.now()}.aba`
-  const filePath = path.join(uploadsDir, fileName)
-  await fs.writeFile(filePath, abaContent, 'ascii')
+  const key = `aba/${payRunId}-${Date.now()}.aba`
+  await uploadFile({ key, body: abaContent, contentType: 'text/plain' })
 
   await prisma.payRun.update({
     where: { id: payRunId },
-    data: { abaFileKey: filePath, abaGeneratedAt: new Date() },
+    data: { abaFileKey: key, abaGeneratedAt: new Date() },
   })
 
-  return filePath
+  return key
 }
 
 // ─── Generate payslips ───────────────────────────────────────────────────────
@@ -424,9 +418,6 @@ export async function generatePayslips(
     },
   })
   if (!payRun) throw new NotFoundError('Pay run')
-
-  const uploadsDir = config.STORAGE_LOCAL_PATH
-  await fs.mkdir(uploadsDir, { recursive: true })
 
   for (const item of payRun.items) {
     const payslipData: PayslipData = {
@@ -500,13 +491,12 @@ export async function generatePayslips(
     }
 
     const pdfBuffer = await generatePayslipPDF(payslipData)
-    const fileName = `payslip-${item.employeeId}-${payRunId}.pdf`
-    const filePath = path.join(uploadsDir, fileName)
-    await fs.writeFile(filePath, pdfBuffer)
+    const key = `payslips/${payRunId}/${item.employeeId}.pdf`
+    await uploadFile({ key, body: pdfBuffer, contentType: 'application/pdf' })
 
     await prisma.payRunItem.update({
       where: { id: item.id },
-      data: { payslipFileKey: filePath, payslipGeneratedAt: new Date() },
+      data: { payslipFileKey: key, payslipGeneratedAt: new Date() },
     })
   }
 }

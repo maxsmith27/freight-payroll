@@ -6,14 +6,16 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc || true",
     "start": "node dist/index.js",
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "prisma": "prisma"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1048.0",
+    "@aws-sdk/lib-storage": "^3.1048.0",
+    "@aws-sdk/s3-request-presigner": "^3.1048.0",
     "@freight-payroll/shared": "workspace:*",
     "@prisma/client": "^5.22.0",
-    "prisma": "^5.22.0",
     "bcryptjs": "^2.4.3",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
@@ -23,11 +25,13 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "pdfmake": "^0.2.12",
+    "prisma": "^5.22.0",
     "uuid": "^11.0.3",
     "winston": "^3.17.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/compression": "^1.7.5",
     "@types/cors": "^2.8.17",
@@ -37,8 +41,10 @@
     "@types/node": "^22.10.2",
     "@types/pdfmake": "^0.2.9",
     "@types/uuid": "^10.0.0",
+    "eslint": "^10.4.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.59.3"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
