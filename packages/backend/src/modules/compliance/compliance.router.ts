@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate } from '../../middleware/auth.middleware.js'
+import { authenticate, requireCompanyAccess } from '../../middleware/auth.middleware.js'
 import { validateBody } from '../../middleware/validate.middleware.js'
 import * as service from './compliance.service.js'
 
@@ -9,10 +9,13 @@ complianceRouter.use(authenticate)
 
 const companyQuery = z.object({ companyId: z.string() })
 const employeeParams = z.object({ employeeId: z.string() })
+const cq = (req: Request) => req.query.companyId as string
+const managerAccess = requireCompanyAccess(cq, 'COMPANY_ADMIN', 'PAYROLL_MANAGER', 'DEPOT_MANAGER', 'SUPERVISOR')
+const payrollAccess = requireCompanyAccess(cq, 'COMPANY_ADMIN', 'PAYROLL_MANAGER')
 
 // ─── Expiry dashboard ────────────────────────────────────────────────────────
 
-complianceRouter.get('/expiry-alerts', async (req: Request, res: Response, next: NextFunction) => {
+complianceRouter.get('/expiry-alerts', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const daysAhead = Number(req.query.daysAhead ?? 90)
@@ -23,7 +26,7 @@ complianceRouter.get('/expiry-alerts', async (req: Request, res: Response, next:
 
 // ─── Driver licences ─────────────────────────────────────────────────────────
 
-complianceRouter.post('/employees/:employeeId/licences', validateBody(service.licenceSchema), async (req: Request, res: Response, next: NextFunction) => {
+complianceRouter.post('/employees/:employeeId/licences', payrollAccess, validateBody(service.licenceSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const { employeeId } = employeeParams.parse(req.params)
@@ -34,7 +37,7 @@ complianceRouter.post('/employees/:employeeId/licences', validateBody(service.li
 
 // ─── Accreditations ───────────────────────────────────────────────────────────
 
-complianceRouter.post('/employees/:employeeId/accreditations', validateBody(service.accreditationSchema), async (req: Request, res: Response, next: NextFunction) => {
+complianceRouter.post('/employees/:employeeId/accreditations', payrollAccess, validateBody(service.accreditationSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const { employeeId } = employeeParams.parse(req.params)
@@ -45,7 +48,7 @@ complianceRouter.post('/employees/:employeeId/accreditations', validateBody(serv
 
 // ─── Medical certificates ─────────────────────────────────────────────────────
 
-complianceRouter.post('/employees/:employeeId/medicals', validateBody(service.medicalCertSchema), async (req: Request, res: Response, next: NextFunction) => {
+complianceRouter.post('/employees/:employeeId/medicals', payrollAccess, validateBody(service.medicalCertSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const { employeeId } = employeeParams.parse(req.params)
@@ -56,7 +59,7 @@ complianceRouter.post('/employees/:employeeId/medicals', validateBody(service.me
 
 // ─── Fatigue management ───────────────────────────────────────────────────────
 
-complianceRouter.post('/fatigue', async (req: Request, res: Response, next: NextFunction) => {
+complianceRouter.post('/fatigue', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const record = await service.recordFatigueEntry(companyId, req.body)
@@ -64,7 +67,7 @@ complianceRouter.post('/fatigue', async (req: Request, res: Response, next: Next
   } catch (err) { next(err) }
 })
 
-complianceRouter.get('/fatigue/report', async (req: Request, res: Response, next: NextFunction) => {
+complianceRouter.get('/fatigue/report', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const { startDate, endDate } = z.object({

@@ -244,41 +244,7 @@ async function main() {
     console.log(`  Created employee: ${empData.firstName} ${empData.lastName} (${empData.employeeNumber})`)
   }
 
-  // --- Public holidays (NSW 2025–2026) ---
-  const publicHolidays = [
-    { name: "New Year's Day",  date: new Date('2025-01-01'), state: 'NSW' },
-    { name: 'Australia Day',   date: new Date('2025-01-27'), state: 'NSW' },
-    { name: 'Good Friday',     date: new Date('2025-04-18'), state: 'NSW' },
-    { name: 'Easter Saturday', date: new Date('2025-04-19'), state: 'NSW' },
-    { name: 'Easter Sunday',   date: new Date('2025-04-20'), state: 'NSW' },
-    { name: 'Easter Monday',   date: new Date('2025-04-21'), state: 'NSW' },
-    { name: 'Anzac Day',       date: new Date('2025-04-25'), state: 'NSW' },
-    { name: "King's Birthday", date: new Date('2025-06-09'), state: 'NSW' },
-    { name: 'Bank Holiday',    date: new Date('2025-08-04'), state: 'NSW' },
-    { name: 'Labour Day',      date: new Date('2025-10-06'), state: 'NSW' },
-    { name: 'Christmas Day',   date: new Date('2025-12-25'), state: 'NSW' },
-    { name: 'Boxing Day',      date: new Date('2025-12-26'), state: 'NSW' },
-    { name: "New Year's Day",  date: new Date('2026-01-01'), state: 'NSW' },
-    { name: 'Australia Day',   date: new Date('2026-01-26'), state: 'NSW' },
-    { name: 'Good Friday',     date: new Date('2026-04-03'), state: 'NSW' },
-    { name: 'Easter Saturday', date: new Date('2026-04-04'), state: 'NSW' },
-    { name: 'Easter Sunday',   date: new Date('2026-04-05'), state: 'NSW' },
-    { name: 'Easter Monday',   date: new Date('2026-04-06'), state: 'NSW' },
-    { name: 'Anzac Day',       date: new Date('2026-04-25'), state: 'NSW' },
-    { name: "King's Birthday", date: new Date('2026-06-08'), state: 'NSW' },
-    { name: 'Christmas Day',   date: new Date('2026-12-25'), state: 'NSW' },
-    { name: 'Boxing Day',      date: new Date('2026-12-28'), state: 'NSW' },
-  ]
-
-  for (const ph of publicHolidays) {
-    await prisma.publicHoliday.upsert({
-      where: { date_state: { date: ph.date, state: ph.state } },
-      update: {},
-      create: { name: ph.name, date: ph.date, state: ph.state, year: ph.date.getFullYear() },
-    })
-  }
-
-  console.log(`  Seeded ${publicHolidays.length} public holidays`)
+  await seedPublicHolidays()
 
   await seedRates()
 
@@ -286,6 +252,376 @@ async function main() {
   console.log('\nLogin credentials:')
   console.log('  Admin:   admin@demo.freightpayroll.com.au / Password123!')
   console.log('  Payroll: payroll@demo.freightpayroll.com.au / Password123!')
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public holidays — all 8 Australian states/territories, 2025–2027
+//
+// Sources (all accessed May 2026):
+//   NSW: https://www.industrialrelations.nsw.gov.au/public-holidays/
+//   VIC: https://www.vic.gov.au/victorian-public-holidays
+//   QLD: https://www.qld.gov.au/recreation/travel/holidays/public
+//   SA:  https://www.safework.sa.gov.au/resources/public-holidays
+//   WA:  https://www.commerce.wa.gov.au/labour-relations/public-holidays-western-australia
+//   TAS: https://worksafe.tas.gov.au/topics/laws-and-compliance/public-holidays
+//   NT:  https://nt.gov.au/employ/employee-rights-and-conditions/leave-and-holidays/public-holidays
+//   ACT: https://www.act.gov.au/public-holidays
+//
+// Floating holiday rules applied:
+//   - Australia Day: observed Mon if 26 Jan falls on Sun (or Sat in some states)
+//   - Anzac Day: additional Mon public holiday when 25 Apr falls on Sun
+//   - Christmas: observed Mon 27 Dec when 25 Dec is Sat; Tue 28 Dec when 25 Dec is Sun
+//   - Boxing Day: observed Mon 28 Dec when 26 Dec is Sat; Tue 28 Dec when 25 Dec is Sat
+//
+// ⚠ Verify against official state gazettes before using in production payroll.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function seedPublicHolidays() {
+  type PH = { name: string; date: string; state: string }
+
+  const holidays: PH[] = [
+    // ── NSW ────────────────────────────────────────────────────────────────────
+    // 2025
+    { state: 'NSW', date: '2025-01-01', name: "New Year's Day" },
+    { state: 'NSW', date: '2025-01-27', name: 'Australia Day' },           // 26 Jan is Sun → observed Mon
+    { state: 'NSW', date: '2025-04-18', name: 'Good Friday' },
+    { state: 'NSW', date: '2025-04-19', name: 'Easter Saturday' },
+    { state: 'NSW', date: '2025-04-20', name: 'Easter Sunday' },
+    { state: 'NSW', date: '2025-04-21', name: 'Easter Monday' },
+    { state: 'NSW', date: '2025-04-25', name: 'Anzac Day' },
+    { state: 'NSW', date: '2025-06-09', name: "King's Birthday" },         // 2nd Mon Jun
+    { state: 'NSW', date: '2025-08-04', name: 'Bank Holiday' },            // 1st Mon Aug
+    { state: 'NSW', date: '2025-10-06', name: 'Labour Day' },              // 1st Mon Oct
+    { state: 'NSW', date: '2025-12-25', name: 'Christmas Day' },
+    { state: 'NSW', date: '2025-12-26', name: 'Boxing Day' },
+    // 2026
+    { state: 'NSW', date: '2026-01-01', name: "New Year's Day" },
+    { state: 'NSW', date: '2026-01-26', name: 'Australia Day' },
+    { state: 'NSW', date: '2026-04-03', name: 'Good Friday' },
+    { state: 'NSW', date: '2026-04-04', name: 'Easter Saturday' },
+    { state: 'NSW', date: '2026-04-05', name: 'Easter Sunday' },
+    { state: 'NSW', date: '2026-04-06', name: 'Easter Monday' },
+    { state: 'NSW', date: '2026-04-25', name: 'Anzac Day' },               // Sat — no sub in NSW
+    { state: 'NSW', date: '2026-06-08', name: "King's Birthday" },         // 2nd Mon Jun
+    { state: 'NSW', date: '2026-08-03', name: 'Bank Holiday' },            // 1st Mon Aug
+    { state: 'NSW', date: '2026-10-05', name: 'Labour Day' },              // 1st Mon Oct
+    { state: 'NSW', date: '2026-12-25', name: 'Christmas Day' },
+    { state: 'NSW', date: '2026-12-28', name: 'Boxing Day' },              // 26 Dec Sat → observed Mon
+    // 2027
+    { state: 'NSW', date: '2027-01-01', name: "New Year's Day" },
+    { state: 'NSW', date: '2027-01-26', name: 'Australia Day' },
+    { state: 'NSW', date: '2027-03-26', name: 'Good Friday' },
+    { state: 'NSW', date: '2027-03-27', name: 'Easter Saturday' },
+    { state: 'NSW', date: '2027-03-28', name: 'Easter Sunday' },
+    { state: 'NSW', date: '2027-03-29', name: 'Easter Monday' },
+    { state: 'NSW', date: '2027-04-25', name: 'Anzac Day' },               // Sun
+    { state: 'NSW', date: '2027-04-26', name: 'Anzac Day (additional)' },  // Mon sub when 25 Apr is Sun
+    { state: 'NSW', date: '2027-06-14', name: "King's Birthday" },         // 2nd Mon Jun
+    { state: 'NSW', date: '2027-08-02', name: 'Bank Holiday' },            // 1st Mon Aug
+    { state: 'NSW', date: '2027-10-04', name: 'Labour Day' },              // 1st Mon Oct
+    { state: 'NSW', date: '2027-12-27', name: 'Christmas Day' },           // 25 Dec Sat → observed Mon
+    { state: 'NSW', date: '2027-12-28', name: 'Boxing Day' },              // 26 Dec Sun → observed Tue
+
+    // ── VIC ────────────────────────────────────────────────────────────────────
+    // 2025
+    { state: 'VIC', date: '2025-01-01', name: "New Year's Day" },
+    { state: 'VIC', date: '2025-01-27', name: 'Australia Day' },
+    { state: 'VIC', date: '2025-03-10', name: 'Labour Day' },              // 2nd Mon Mar
+    { state: 'VIC', date: '2025-04-18', name: 'Good Friday' },
+    { state: 'VIC', date: '2025-04-19', name: 'Easter Saturday' },
+    { state: 'VIC', date: '2025-04-20', name: 'Easter Sunday' },
+    { state: 'VIC', date: '2025-04-21', name: 'Easter Monday' },
+    { state: 'VIC', date: '2025-04-25', name: 'Anzac Day' },
+    { state: 'VIC', date: '2025-06-09', name: "King's Birthday" },         // 2nd Mon Jun
+    { state: 'VIC', date: '2025-11-04', name: 'Melbourne Cup Day' },       // 1st Tue Nov
+    { state: 'VIC', date: '2025-12-25', name: 'Christmas Day' },
+    { state: 'VIC', date: '2025-12-26', name: 'Boxing Day' },
+    // 2026
+    { state: 'VIC', date: '2026-01-01', name: "New Year's Day" },
+    { state: 'VIC', date: '2026-01-26', name: 'Australia Day' },
+    { state: 'VIC', date: '2026-03-09', name: 'Labour Day' },              // 2nd Mon Mar
+    { state: 'VIC', date: '2026-04-03', name: 'Good Friday' },
+    { state: 'VIC', date: '2026-04-04', name: 'Easter Saturday' },
+    { state: 'VIC', date: '2026-04-05', name: 'Easter Sunday' },
+    { state: 'VIC', date: '2026-04-06', name: 'Easter Monday' },
+    { state: 'VIC', date: '2026-04-25', name: 'Anzac Day' },
+    { state: 'VIC', date: '2026-06-08', name: "King's Birthday" },
+    { state: 'VIC', date: '2026-11-03', name: 'Melbourne Cup Day' },       // 1st Tue Nov
+    { state: 'VIC', date: '2026-12-25', name: 'Christmas Day' },
+    { state: 'VIC', date: '2026-12-28', name: 'Boxing Day' },
+    // 2027
+    { state: 'VIC', date: '2027-01-01', name: "New Year's Day" },
+    { state: 'VIC', date: '2027-01-26', name: 'Australia Day' },
+    { state: 'VIC', date: '2027-03-08', name: 'Labour Day' },              // 2nd Mon Mar
+    { state: 'VIC', date: '2027-03-26', name: 'Good Friday' },
+    { state: 'VIC', date: '2027-03-27', name: 'Easter Saturday' },
+    { state: 'VIC', date: '2027-03-28', name: 'Easter Sunday' },
+    { state: 'VIC', date: '2027-03-29', name: 'Easter Monday' },
+    { state: 'VIC', date: '2027-04-25', name: 'Anzac Day' },
+    { state: 'VIC', date: '2027-04-26', name: 'Anzac Day (additional)' },
+    { state: 'VIC', date: '2027-06-14', name: "King's Birthday" },
+    { state: 'VIC', date: '2027-11-02', name: 'Melbourne Cup Day' },       // 1st Tue Nov
+    { state: 'VIC', date: '2027-12-27', name: 'Christmas Day' },
+    { state: 'VIC', date: '2027-12-28', name: 'Boxing Day' },
+
+    // ── QLD ────────────────────────────────────────────────────────────────────
+    // Easter Sunday is NOT a public holiday in QLD.
+    // King's Birthday: 2nd Mon October (moved from June in 2016)
+    // 2025
+    { state: 'QLD', date: '2025-01-01', name: "New Year's Day" },
+    { state: 'QLD', date: '2025-01-27', name: 'Australia Day' },
+    { state: 'QLD', date: '2025-04-18', name: 'Good Friday' },
+    { state: 'QLD', date: '2025-04-19', name: 'Easter Saturday' },
+    { state: 'QLD', date: '2025-04-21', name: 'Easter Monday' },
+    { state: 'QLD', date: '2025-04-25', name: 'Anzac Day' },
+    { state: 'QLD', date: '2025-05-05', name: 'Labour Day' },              // 1st Mon May
+    { state: 'QLD', date: '2025-10-13', name: "King's Birthday" },         // 2nd Mon Oct
+    { state: 'QLD', date: '2025-12-25', name: 'Christmas Day' },
+    { state: 'QLD', date: '2025-12-26', name: 'Boxing Day' },
+    // 2026
+    { state: 'QLD', date: '2026-01-01', name: "New Year's Day" },
+    { state: 'QLD', date: '2026-01-26', name: 'Australia Day' },
+    { state: 'QLD', date: '2026-04-03', name: 'Good Friday' },
+    { state: 'QLD', date: '2026-04-04', name: 'Easter Saturday' },
+    { state: 'QLD', date: '2026-04-06', name: 'Easter Monday' },
+    { state: 'QLD', date: '2026-04-25', name: 'Anzac Day' },
+    { state: 'QLD', date: '2026-05-04', name: 'Labour Day' },              // 1st Mon May
+    { state: 'QLD', date: '2026-10-12', name: "King's Birthday" },         // 2nd Mon Oct
+    { state: 'QLD', date: '2026-12-25', name: 'Christmas Day' },
+    { state: 'QLD', date: '2026-12-28', name: 'Boxing Day' },
+    // 2027
+    { state: 'QLD', date: '2027-01-01', name: "New Year's Day" },
+    { state: 'QLD', date: '2027-01-26', name: 'Australia Day' },
+    { state: 'QLD', date: '2027-03-26', name: 'Good Friday' },
+    { state: 'QLD', date: '2027-03-27', name: 'Easter Saturday' },
+    { state: 'QLD', date: '2027-03-29', name: 'Easter Monday' },
+    { state: 'QLD', date: '2027-04-25', name: 'Anzac Day' },
+    { state: 'QLD', date: '2027-04-26', name: 'Anzac Day (additional)' },
+    { state: 'QLD', date: '2027-05-03', name: 'Labour Day' },              // 1st Mon May
+    { state: 'QLD', date: '2027-10-11', name: "King's Birthday" },         // 2nd Mon Oct
+    { state: 'QLD', date: '2027-12-27', name: 'Christmas Day' },
+    { state: 'QLD', date: '2027-12-28', name: 'Boxing Day' },
+
+    // ── SA ─────────────────────────────────────────────────────────────────────
+    // SA does not observe Easter Sunday as a PH.
+    // SA calls Boxing Day "Proclamation Day".
+    // Adelaide Cup: 2nd Mon May
+    // 2025
+    { state: 'SA', date: '2025-01-01', name: "New Year's Day" },
+    { state: 'SA', date: '2025-01-27', name: 'Australia Day' },
+    { state: 'SA', date: '2025-04-18', name: 'Good Friday' },
+    { state: 'SA', date: '2025-04-19', name: 'Easter Saturday' },
+    { state: 'SA', date: '2025-04-21', name: 'Easter Monday' },
+    { state: 'SA', date: '2025-04-25', name: 'Anzac Day' },
+    { state: 'SA', date: '2025-05-12', name: 'Adelaide Cup' },             // 2nd Mon May
+    { state: 'SA', date: '2025-06-09', name: "King's Birthday" },          // 2nd Mon Jun
+    { state: 'SA', date: '2025-10-06', name: 'Labour Day' },               // 1st Mon Oct
+    { state: 'SA', date: '2025-12-25', name: 'Christmas Day' },
+    { state: 'SA', date: '2025-12-26', name: 'Proclamation Day' },
+    // 2026
+    { state: 'SA', date: '2026-01-01', name: "New Year's Day" },
+    { state: 'SA', date: '2026-01-26', name: 'Australia Day' },
+    { state: 'SA', date: '2026-04-03', name: 'Good Friday' },
+    { state: 'SA', date: '2026-04-04', name: 'Easter Saturday' },
+    { state: 'SA', date: '2026-04-06', name: 'Easter Monday' },
+    { state: 'SA', date: '2026-04-25', name: 'Anzac Day' },
+    { state: 'SA', date: '2026-05-11', name: 'Adelaide Cup' },             // 2nd Mon May
+    { state: 'SA', date: '2026-06-08', name: "King's Birthday" },
+    { state: 'SA', date: '2026-10-05', name: 'Labour Day' },
+    { state: 'SA', date: '2026-12-25', name: 'Christmas Day' },
+    { state: 'SA', date: '2026-12-28', name: 'Proclamation Day' },
+    // 2027
+    { state: 'SA', date: '2027-01-01', name: "New Year's Day" },
+    { state: 'SA', date: '2027-01-26', name: 'Australia Day' },
+    { state: 'SA', date: '2027-03-26', name: 'Good Friday' },
+    { state: 'SA', date: '2027-03-27', name: 'Easter Saturday' },
+    { state: 'SA', date: '2027-03-29', name: 'Easter Monday' },
+    { state: 'SA', date: '2027-04-25', name: 'Anzac Day' },
+    { state: 'SA', date: '2027-04-26', name: 'Anzac Day (additional)' },
+    { state: 'SA', date: '2027-05-10', name: 'Adelaide Cup' },             // 2nd Mon May
+    { state: 'SA', date: '2027-06-14', name: "King's Birthday" },
+    { state: 'SA', date: '2027-10-04', name: 'Labour Day' },
+    { state: 'SA', date: '2027-12-27', name: 'Christmas Day' },
+    { state: 'SA', date: '2027-12-28', name: 'Proclamation Day' },
+
+    // ── WA ─────────────────────────────────────────────────────────────────────
+    // WA does not observe Easter Sunday as a PH.
+    // Foundation Day (Western Australia Day): 1st Mon Jun
+    // King's Birthday: 4th Mon Sep
+    // Labour Day: 1st Mon Mar
+    // 2025
+    { state: 'WA', date: '2025-01-01', name: "New Year's Day" },
+    { state: 'WA', date: '2025-01-27', name: 'Australia Day' },
+    { state: 'WA', date: '2025-03-03', name: 'Labour Day' },               // 1st Mon Mar
+    { state: 'WA', date: '2025-04-18', name: 'Good Friday' },
+    { state: 'WA', date: '2025-04-19', name: 'Easter Saturday' },
+    { state: 'WA', date: '2025-04-21', name: 'Easter Monday' },
+    { state: 'WA', date: '2025-04-25', name: 'Anzac Day' },
+    { state: 'WA', date: '2025-06-02', name: 'Western Australia Day' },    // 1st Mon Jun
+    { state: 'WA', date: '2025-09-22', name: "King's Birthday" },          // 4th Mon Sep
+    { state: 'WA', date: '2025-12-25', name: 'Christmas Day' },
+    { state: 'WA', date: '2025-12-26', name: 'Boxing Day' },
+    // 2026
+    { state: 'WA', date: '2026-01-01', name: "New Year's Day" },
+    { state: 'WA', date: '2026-01-26', name: 'Australia Day' },
+    { state: 'WA', date: '2026-03-02', name: 'Labour Day' },               // 1st Mon Mar
+    { state: 'WA', date: '2026-04-03', name: 'Good Friday' },
+    { state: 'WA', date: '2026-04-04', name: 'Easter Saturday' },
+    { state: 'WA', date: '2026-04-06', name: 'Easter Monday' },
+    { state: 'WA', date: '2026-04-25', name: 'Anzac Day' },
+    { state: 'WA', date: '2026-06-01', name: 'Western Australia Day' },    // 1st Mon Jun
+    { state: 'WA', date: '2026-09-28', name: "King's Birthday" },          // 4th Mon Sep
+    { state: 'WA', date: '2026-12-25', name: 'Christmas Day' },
+    { state: 'WA', date: '2026-12-28', name: 'Boxing Day' },
+    // 2027
+    { state: 'WA', date: '2027-01-01', name: "New Year's Day" },
+    { state: 'WA', date: '2027-01-26', name: 'Australia Day' },
+    { state: 'WA', date: '2027-03-01', name: 'Labour Day' },               // 1st Mon Mar
+    { state: 'WA', date: '2027-03-26', name: 'Good Friday' },
+    { state: 'WA', date: '2027-03-27', name: 'Easter Saturday' },
+    { state: 'WA', date: '2027-03-29', name: 'Easter Monday' },
+    { state: 'WA', date: '2027-04-25', name: 'Anzac Day' },
+    { state: 'WA', date: '2027-04-26', name: 'Anzac Day (additional)' },
+    { state: 'WA', date: '2027-06-07', name: 'Western Australia Day' },    // 1st Mon Jun
+    { state: 'WA', date: '2027-09-27', name: "King's Birthday" },          // 4th Mon Sep
+    { state: 'WA', date: '2027-12-27', name: 'Christmas Day' },
+    { state: 'WA', date: '2027-12-28', name: 'Boxing Day' },
+
+    // ── TAS ────────────────────────────────────────────────────────────────────
+    // TAS does not observe Easter Sunday as a PH.
+    // Eight Hours Day (Labour Day): 2nd Mon Mar
+    // 2025
+    { state: 'TAS', date: '2025-01-01', name: "New Year's Day" },
+    { state: 'TAS', date: '2025-01-27', name: 'Australia Day' },
+    { state: 'TAS', date: '2025-03-10', name: 'Eight Hours Day' },         // 2nd Mon Mar
+    { state: 'TAS', date: '2025-04-18', name: 'Good Friday' },
+    { state: 'TAS', date: '2025-04-19', name: 'Easter Saturday' },
+    { state: 'TAS', date: '2025-04-21', name: 'Easter Monday' },
+    { state: 'TAS', date: '2025-04-25', name: 'Anzac Day' },
+    { state: 'TAS', date: '2025-06-09', name: "King's Birthday" },         // 2nd Mon Jun
+    { state: 'TAS', date: '2025-12-25', name: 'Christmas Day' },
+    { state: 'TAS', date: '2025-12-26', name: 'Boxing Day' },
+    // 2026
+    { state: 'TAS', date: '2026-01-01', name: "New Year's Day" },
+    { state: 'TAS', date: '2026-01-26', name: 'Australia Day' },
+    { state: 'TAS', date: '2026-03-09', name: 'Eight Hours Day' },         // 2nd Mon Mar
+    { state: 'TAS', date: '2026-04-03', name: 'Good Friday' },
+    { state: 'TAS', date: '2026-04-04', name: 'Easter Saturday' },
+    { state: 'TAS', date: '2026-04-06', name: 'Easter Monday' },
+    { state: 'TAS', date: '2026-04-25', name: 'Anzac Day' },
+    { state: 'TAS', date: '2026-06-08', name: "King's Birthday" },
+    { state: 'TAS', date: '2026-12-25', name: 'Christmas Day' },
+    { state: 'TAS', date: '2026-12-28', name: 'Boxing Day' },
+    // 2027
+    { state: 'TAS', date: '2027-01-01', name: "New Year's Day" },
+    { state: 'TAS', date: '2027-01-26', name: 'Australia Day' },
+    { state: 'TAS', date: '2027-03-08', name: 'Eight Hours Day' },         // 2nd Mon Mar
+    { state: 'TAS', date: '2027-03-26', name: 'Good Friday' },
+    { state: 'TAS', date: '2027-03-27', name: 'Easter Saturday' },
+    { state: 'TAS', date: '2027-03-29', name: 'Easter Monday' },
+    { state: 'TAS', date: '2027-04-25', name: 'Anzac Day' },
+    { state: 'TAS', date: '2027-04-26', name: 'Anzac Day (additional)' },
+    { state: 'TAS', date: '2027-06-14', name: "King's Birthday" },
+    { state: 'TAS', date: '2027-12-27', name: 'Christmas Day' },
+    { state: 'TAS', date: '2027-12-28', name: 'Boxing Day' },
+
+    // ── NT ─────────────────────────────────────────────────────────────────────
+    // NT does not observe Easter Sunday as a PH.
+    // May Day: 1st Mon May
+    // Picnic Day: 1st Mon Aug
+    // 2025
+    { state: 'NT', date: '2025-01-01', name: "New Year's Day" },
+    { state: 'NT', date: '2025-01-27', name: 'Australia Day' },
+    { state: 'NT', date: '2025-04-18', name: 'Good Friday' },
+    { state: 'NT', date: '2025-04-19', name: 'Easter Saturday' },
+    { state: 'NT', date: '2025-04-21', name: 'Easter Monday' },
+    { state: 'NT', date: '2025-04-25', name: 'Anzac Day' },
+    { state: 'NT', date: '2025-05-05', name: 'May Day' },                  // 1st Mon May
+    { state: 'NT', date: '2025-06-09', name: "King's Birthday" },          // 2nd Mon Jun
+    { state: 'NT', date: '2025-08-04', name: 'Picnic Day' },               // 1st Mon Aug
+    { state: 'NT', date: '2025-12-25', name: 'Christmas Day' },
+    { state: 'NT', date: '2025-12-26', name: 'Boxing Day' },
+    // 2026
+    { state: 'NT', date: '2026-01-01', name: "New Year's Day" },
+    { state: 'NT', date: '2026-01-26', name: 'Australia Day' },
+    { state: 'NT', date: '2026-04-03', name: 'Good Friday' },
+    { state: 'NT', date: '2026-04-04', name: 'Easter Saturday' },
+    { state: 'NT', date: '2026-04-06', name: 'Easter Monday' },
+    { state: 'NT', date: '2026-04-25', name: 'Anzac Day' },
+    { state: 'NT', date: '2026-05-04', name: 'May Day' },                  // 1st Mon May
+    { state: 'NT', date: '2026-06-08', name: "King's Birthday" },
+    { state: 'NT', date: '2026-08-03', name: 'Picnic Day' },               // 1st Mon Aug
+    { state: 'NT', date: '2026-12-25', name: 'Christmas Day' },
+    { state: 'NT', date: '2026-12-28', name: 'Boxing Day' },
+    // 2027
+    { state: 'NT', date: '2027-01-01', name: "New Year's Day" },
+    { state: 'NT', date: '2027-01-26', name: 'Australia Day' },
+    { state: 'NT', date: '2027-03-26', name: 'Good Friday' },
+    { state: 'NT', date: '2027-03-27', name: 'Easter Saturday' },
+    { state: 'NT', date: '2027-03-29', name: 'Easter Monday' },
+    { state: 'NT', date: '2027-04-25', name: 'Anzac Day' },
+    { state: 'NT', date: '2027-04-26', name: 'Anzac Day (additional)' },
+    { state: 'NT', date: '2027-05-03', name: 'May Day' },                  // 1st Mon May
+    { state: 'NT', date: '2027-06-14', name: "King's Birthday" },
+    { state: 'NT', date: '2027-08-02', name: 'Picnic Day' },               // 1st Mon Aug
+    { state: 'NT', date: '2027-12-27', name: 'Christmas Day' },
+    { state: 'NT', date: '2027-12-28', name: 'Boxing Day' },
+
+    // ── ACT ────────────────────────────────────────────────────────────────────
+    // ACT does not observe Easter Sunday as a PH.
+    // Canberra Day: 2nd Mon Mar
+    // Reconciliation Day: Mon on or before 27 May
+    // Labour Day: 1st Mon Oct
+    // 2025
+    { state: 'ACT', date: '2025-01-01', name: "New Year's Day" },
+    { state: 'ACT', date: '2025-01-27', name: 'Australia Day' },
+    { state: 'ACT', date: '2025-03-10', name: 'Canberra Day' },            // 2nd Mon Mar
+    { state: 'ACT', date: '2025-04-18', name: 'Good Friday' },
+    { state: 'ACT', date: '2025-04-19', name: 'Easter Saturday' },
+    { state: 'ACT', date: '2025-04-21', name: 'Easter Monday' },
+    { state: 'ACT', date: '2025-04-25', name: 'Anzac Day' },
+    { state: 'ACT', date: '2025-05-26', name: 'Reconciliation Day' },      // Mon on or before 27 May (27=Tue)
+    { state: 'ACT', date: '2025-06-09', name: "King's Birthday" },         // 2nd Mon Jun
+    { state: 'ACT', date: '2025-10-06', name: 'Labour Day' },              // 1st Mon Oct
+    { state: 'ACT', date: '2025-12-25', name: 'Christmas Day' },
+    { state: 'ACT', date: '2025-12-26', name: 'Boxing Day' },
+    // 2026
+    { state: 'ACT', date: '2026-01-01', name: "New Year's Day" },
+    { state: 'ACT', date: '2026-01-26', name: 'Australia Day' },
+    { state: 'ACT', date: '2026-03-09', name: 'Canberra Day' },            // 2nd Mon Mar
+    { state: 'ACT', date: '2026-04-03', name: 'Good Friday' },
+    { state: 'ACT', date: '2026-04-04', name: 'Easter Saturday' },
+    { state: 'ACT', date: '2026-04-06', name: 'Easter Monday' },
+    { state: 'ACT', date: '2026-04-25', name: 'Anzac Day' },
+    { state: 'ACT', date: '2026-05-25', name: 'Reconciliation Day' },      // Mon on or before 27 May (27=Wed)
+    { state: 'ACT', date: '2026-06-08', name: "King's Birthday" },
+    { state: 'ACT', date: '2026-10-05', name: 'Labour Day' },
+    { state: 'ACT', date: '2026-12-25', name: 'Christmas Day' },
+    { state: 'ACT', date: '2026-12-28', name: 'Boxing Day' },
+    // 2027
+    { state: 'ACT', date: '2027-01-01', name: "New Year's Day" },
+    { state: 'ACT', date: '2027-01-26', name: 'Australia Day' },
+    { state: 'ACT', date: '2027-03-08', name: 'Canberra Day' },            // 2nd Mon Mar
+    { state: 'ACT', date: '2027-03-26', name: 'Good Friday' },
+    { state: 'ACT', date: '2027-03-27', name: 'Easter Saturday' },
+    { state: 'ACT', date: '2027-03-29', name: 'Easter Monday' },
+    { state: 'ACT', date: '2027-04-25', name: 'Anzac Day' },
+    { state: 'ACT', date: '2027-04-26', name: 'Anzac Day (additional)' },
+    { state: 'ACT', date: '2027-05-24', name: 'Reconciliation Day' },      // Mon on or before 27 May (27=Thu)
+    { state: 'ACT', date: '2027-06-14', name: "King's Birthday" },
+    { state: 'ACT', date: '2027-10-04', name: 'Labour Day' },
+    { state: 'ACT', date: '2027-12-27', name: 'Christmas Day' },
+    { state: 'ACT', date: '2027-12-28', name: 'Boxing Day' },
+  ]
+
+  await prisma.publicHoliday.deleteMany({ where: { year: { in: [2025, 2026, 2027] } } })
+  await prisma.publicHoliday.createMany({
+    data: holidays.map(h => {
+      const date = new Date(h.date)
+      return { name: h.name, date, state: h.state, year: date.getFullYear() }
+    }),
+  })
+  console.log(`  Seeded ${holidays.length} public holidays (all states/territories, 2025–2027)`)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -303,10 +639,15 @@ async function main() {
 // Super rate: 12.0% effective 1 July 2025 — ATO final scheduled increase
 //   Source: https://www.ato.gov.au/tax-rates-and-codes/key-superannuation-rates-and-thresholds/super-guarantee
 //
-// PAYG brackets: FY2025-26 income tax brackets (Stage 3 cuts, unchanged from 2024-25)
-//   Source: https://www.ato.gov.au/tax-rates-and-codes/tax-rates-australian-residents
-//   Coefficients a and b satisfy: annual_tax = a × annual_income - b
-//   LITO is applied separately in the withholding engine — these are base marginal rates only.
+// PAYG brackets: FY2025-26 (Stage 3 cuts, unchanged from 2024-25)
+//   Sources:
+//     Residents:   https://www.ato.gov.au/tax-rates-and-codes/tax-rates-australian-residents
+//     Foreign:     https://www.ato.gov.au/tax-rates-and-codes/tax-rates-foreign-residents
+//     WHM:         https://www.ato.gov.au/individuals-and-families/coming-to-australia/working-holiday-makers
+//   Scales seeded: Scale 1 (resident, no threshold), Scale 2 (resident, claims threshold),
+//                  Scale 3 (foreign resident), Scale 6 (working holiday maker)
+//   Coefficients a and b satisfy: weekly_tax = a × weekly_income − b
+//   LITO and Medicare Levy are applied separately in the withholding engine.
 //   ⚠ Verify NAT 3539 coefficients at ato.gov.au before using in production withholding.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -492,6 +833,18 @@ async function seedRates() {
     { residency: TaxResidencyStatus.RESIDENT, tfThreshold: false, hasHECS: false, freq: PayFrequency.WEEKLY, from: 865.40,  to: 2596.15, a: '0.3200000', b: '112.8900000' },
     { residency: TaxResidencyStatus.RESIDENT, tfThreshold: false, hasHECS: false, freq: PayFrequency.WEEKLY, from: 2596.16, to: 3653.85, a: '0.3700000', b: '242.7500000' },
     { residency: TaxResidencyStatus.RESIDENT, tfThreshold: false, hasHECS: false, freq: PayFrequency.WEEKLY, from: 3653.86, to: null,    a: '0.4500000', b: '534.9038462' },
+    // Scale 3: Foreign Residents — no tax-free threshold, no LITO, no Medicare Levy
+    // Annual brackets: $0–$135k @30%, $135k–$190k @37%, $190k+ @45%
+    // Weekly: a×w − b where b = (prior_bracket_tax / 52) adjusted for weekly basis
+    { residency: TaxResidencyStatus.FOREIGN_RESIDENT, tfThreshold: false, hasHECS: false, freq: PayFrequency.WEEKLY, from: 0,       to: 2596.15, a: '0.3000000', b: '0.0000000' },
+    { residency: TaxResidencyStatus.FOREIGN_RESIDENT, tfThreshold: false, hasHECS: false, freq: PayFrequency.WEEKLY, from: 2596.16, to: 3653.85, a: '0.3700000', b: '181.7308000' },
+    { residency: TaxResidencyStatus.FOREIGN_RESIDENT, tfThreshold: false, hasHECS: false, freq: PayFrequency.WEEKLY, from: 3653.86, to: null,    a: '0.4500000', b: '473.9615000' },
+    // Scale 6: Working Holiday Makers
+    // Annual brackets: $0–$45k @15%, $45k–$135k @30%, $135k–$190k @37%, $190k+ @45%
+    { residency: TaxResidencyStatus.WORKING_HOLIDAY_MAKER, tfThreshold: false, hasHECS: false, freq: PayFrequency.WEEKLY, from: 0,       to: 865.38,  a: '0.1500000', b: '0.0000000' },
+    { residency: TaxResidencyStatus.WORKING_HOLIDAY_MAKER, tfThreshold: false, hasHECS: false, freq: PayFrequency.WEEKLY, from: 865.40,  to: 2596.15, a: '0.3000000', b: '129.8077000' },
+    { residency: TaxResidencyStatus.WORKING_HOLIDAY_MAKER, tfThreshold: false, hasHECS: false, freq: PayFrequency.WEEKLY, from: 2596.16, to: 3653.85, a: '0.3700000', b: '311.5385000' },
+    { residency: TaxResidencyStatus.WORKING_HOLIDAY_MAKER, tfThreshold: false, hasHECS: false, freq: PayFrequency.WEEKLY, from: 3653.86, to: null,    a: '0.4500000', b: '603.8462000' },
   ]
 
   // Delete existing FY2025-26 brackets before re-seeding (idempotent)

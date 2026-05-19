@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate } from '../../middleware/auth.middleware.js'
+import { authenticate, requireCompanyAccess } from '../../middleware/auth.middleware.js'
 import { validateBody, validateQuery } from '../../middleware/validate.middleware.js'
 import * as service from './leave.service.js'
 
@@ -8,8 +8,10 @@ export const leaveRouter = Router()
 leaveRouter.use(authenticate)
 
 const companyQuery = z.object({ companyId: z.string() })
+const cq = (req: Request) => req.query.companyId as string
+const managerAccess = requireCompanyAccess(cq, 'COMPANY_ADMIN', 'PAYROLL_MANAGER', 'DEPOT_MANAGER', 'SUPERVISOR')
 
-leaveRouter.post('/requests', validateBody(service.leaveRequestSchema), async (req: Request, res: Response, next: NextFunction) => {
+leaveRouter.post('/requests', managerAccess, validateBody(service.leaveRequestSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const request = await service.requestLeave(companyId, req.body)
@@ -17,7 +19,7 @@ leaveRouter.post('/requests', validateBody(service.leaveRequestSchema), async (r
   } catch (err) { next(err) }
 })
 
-leaveRouter.get('/requests', async (req: Request, res: Response, next: NextFunction) => {
+leaveRouter.get('/requests', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const filters = {
@@ -30,7 +32,7 @@ leaveRouter.get('/requests', async (req: Request, res: Response, next: NextFunct
   } catch (err) { next(err) }
 })
 
-leaveRouter.post('/requests/:id/approve', async (req: Request, res: Response, next: NextFunction) => {
+leaveRouter.post('/requests/:id/approve', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const { notes } = z.object({ notes: z.string().optional() }).parse(req.body)
@@ -39,7 +41,7 @@ leaveRouter.post('/requests/:id/approve', async (req: Request, res: Response, ne
   } catch (err) { next(err) }
 })
 
-leaveRouter.post('/requests/:id/decline', async (req: Request, res: Response, next: NextFunction) => {
+leaveRouter.post('/requests/:id/decline', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const { notes } = z.object({ notes: z.string().min(1) }).parse(req.body)
@@ -48,7 +50,7 @@ leaveRouter.post('/requests/:id/decline', async (req: Request, res: Response, ne
   } catch (err) { next(err) }
 })
 
-leaveRouter.get('/balances/:employeeId', async (req: Request, res: Response, next: NextFunction) => {
+leaveRouter.get('/balances/:employeeId', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const balances = await service.getLeaveBalances(req.params.employeeId, companyId)

@@ -1,10 +1,13 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate } from '../../middleware/auth.middleware.js'
+import { authenticate, requireCompanyAccess } from '../../middleware/auth.middleware.js'
 import * as service from './reports.service.js'
 
 export const reportsRouter = Router()
 reportsRouter.use(authenticate)
+
+const cq = (req: Request) => req.query.companyId as string
+const payrollAccess = requireCompanyAccess(cq, 'COMPANY_ADMIN', 'PAYROLL_MANAGER')
 
 const dateRangeQuery = z.object({
   companyId: z.string(),
@@ -12,7 +15,7 @@ const dateRangeQuery = z.object({
   endDate: z.string(),
 })
 
-reportsRouter.get('/payroll-summary', async (req: Request, res: Response, next: NextFunction) => {
+reportsRouter.get('/payroll-summary', payrollAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId, startDate, endDate } = dateRangeQuery.parse(req.query)
     const report = await service.getPayrollSummaryReport(companyId, new Date(startDate), new Date(endDate))
@@ -20,7 +23,7 @@ reportsRouter.get('/payroll-summary', async (req: Request, res: Response, next: 
   } catch (err) { next(err) }
 })
 
-reportsRouter.get('/employee-payroll/:employeeId', async (req: Request, res: Response, next: NextFunction) => {
+reportsRouter.get('/employee-payroll/:employeeId', payrollAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId, startDate, endDate } = dateRangeQuery.parse(req.query)
     const report = await service.getEmployeePayrollDetail(companyId, req.params.employeeId, new Date(startDate), new Date(endDate))
@@ -28,7 +31,7 @@ reportsRouter.get('/employee-payroll/:employeeId', async (req: Request, res: Res
   } catch (err) { next(err) }
 })
 
-reportsRouter.get('/super', async (req: Request, res: Response, next: NextFunction) => {
+reportsRouter.get('/super', payrollAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId, startDate, endDate } = dateRangeQuery.parse(req.query)
     const report = await service.getSuperReport(companyId, new Date(startDate), new Date(endDate))
@@ -36,7 +39,7 @@ reportsRouter.get('/super', async (req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err) }
 })
 
-reportsRouter.get('/leave-liability', async (req: Request, res: Response, next: NextFunction) => {
+reportsRouter.get('/leave-liability', payrollAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = z.object({ companyId: z.string() }).parse(req.query)
     const report = await service.getLeaveLiabilityReport(companyId)
@@ -44,7 +47,7 @@ reportsRouter.get('/leave-liability', async (req: Request, res: Response, next: 
   } catch (err) { next(err) }
 })
 
-reportsRouter.get('/headcount', async (req: Request, res: Response, next: NextFunction) => {
+reportsRouter.get('/headcount', payrollAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = z.object({ companyId: z.string() }).parse(req.query)
     const report = await service.getHeadcountReport(companyId)

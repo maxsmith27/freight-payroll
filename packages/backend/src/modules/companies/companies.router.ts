@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate } from '../../middleware/auth.middleware.js'
+import { authenticate, requireCompanyAccess } from '../../middleware/auth.middleware.js'
 import { validateBody, validateQuery } from '../../middleware/validate.middleware.js'
 import {
   getCompaniesForOrg,
@@ -19,6 +19,9 @@ import { writeAuditLog } from '../../middleware/audit.middleware.js'
 export const companiesRouter = Router()
 companiesRouter.use(authenticate)
 
+// companyId lives in req.params.id for all /:id routes
+const cp = (req: Request) => req.params.id
+
 companiesRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companies = await getCompaniesForOrg(req.user!.organizationId)
@@ -34,28 +37,28 @@ companiesRouter.post('/', validateBody(createCompanySchema), async (req: Request
   } catch (err) { next(err) }
 })
 
-companiesRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
+companiesRouter.get('/:id', requireCompanyAccess(cp), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const company = await getCompany(req.params.id, req.user!.organizationId)
     res.json({ success: true, data: company })
   } catch (err) { next(err) }
 })
 
-companiesRouter.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
+companiesRouter.put('/:id', requireCompanyAccess(cp, 'COMPANY_ADMIN'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const company = await updateCompany(req.params.id, req.user!.organizationId, req.body)
     res.json({ success: true, data: company })
   } catch (err) { next(err) }
 })
 
-companiesRouter.get('/:id/depots', async (req: Request, res: Response, next: NextFunction) => {
+companiesRouter.get('/:id/depots', requireCompanyAccess(cp), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const depots = await getDepots(req.params.id)
     res.json({ success: true, data: depots })
   } catch (err) { next(err) }
 })
 
-companiesRouter.post('/:id/depots', validateBody(createDepotSchema), async (req: Request, res: Response, next: NextFunction) => {
+companiesRouter.post('/:id/depots', requireCompanyAccess(cp, 'COMPANY_ADMIN'), validateBody(createDepotSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const depot = await createDepot(req.params.id, req.user!.organizationId, req.body)
     res.status(201).json({ success: true, data: depot })
@@ -73,7 +76,7 @@ const listEmployeesQuery = z.object({
   pageSize: z.coerce.number().default(50),
 })
 
-companiesRouter.get('/:id/employees', validateQuery(listEmployeesQuery), async (req: Request, res: Response, next: NextFunction) => {
+companiesRouter.get('/:id/employees', requireCompanyAccess(cp, 'COMPANY_ADMIN', 'PAYROLL_MANAGER', 'DEPOT_MANAGER', 'SUPERVISOR'), validateQuery(listEmployeesQuery), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const filters = req.query as unknown as z.infer<typeof listEmployeesQuery>
     const result = await employeeService.listEmployees(req.params.id, filters)
@@ -81,7 +84,7 @@ companiesRouter.get('/:id/employees', validateQuery(listEmployeesQuery), async (
   } catch (err) { next(err) }
 })
 
-companiesRouter.post('/:id/employees', validateBody(employeeService.createEmployeeSchema), async (req: Request, res: Response, next: NextFunction) => {
+companiesRouter.post('/:id/employees', requireCompanyAccess(cp, 'COMPANY_ADMIN', 'PAYROLL_MANAGER'), validateBody(employeeService.createEmployeeSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const employee = await employeeService.createEmployee(req.params.id, req.body, req.user!.id)
     await writeAuditLog(req, {

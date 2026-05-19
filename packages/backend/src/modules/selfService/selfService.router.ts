@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate } from '../../middleware/auth.middleware.js'
+import { authenticate, requireCompanyAccess } from '../../middleware/auth.middleware.js'
 import { validateBody, validateQuery } from '../../middleware/validate.middleware.js'
 import * as service from './selfService.service.js'
 import { AppError } from '../../middleware/error.middleware.js'
@@ -8,6 +8,9 @@ import prisma from '../../lib/prisma.js'
 
 export const selfServiceRouter = Router()
 selfServiceRouter.use(authenticate)
+
+const cq = (req: Request) => req.query.companyId as string
+const managerAccess = requireCompanyAccess(cq, 'COMPANY_ADMIN', 'PAYROLL_MANAGER', 'DEPOT_MANAGER', 'SUPERVISOR')
 
 // Helper: resolve employeeId from the authenticated user's linked employee record
 async function resolveEmployee(req: Request) {
@@ -90,7 +93,7 @@ const manageKmQuery = z.object({
   pageSize: z.coerce.number().default(50),
 })
 
-selfServiceRouter.get('/km-logs/manage', validateQuery(manageKmQuery), async (req: Request, res: Response, next: NextFunction) => {
+selfServiceRouter.get('/km-logs/manage', managerAccess, validateQuery(manageKmQuery), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId, page, pageSize, ...filters } = req.query as unknown as z.infer<typeof manageKmQuery>
     const result = await service.listCompanyKmLogs(companyId, filters, page, pageSize)
@@ -98,7 +101,7 @@ selfServiceRouter.get('/km-logs/manage', validateQuery(manageKmQuery), async (re
   } catch (err) { next(err) }
 })
 
-selfServiceRouter.post('/km-logs/:id/approve', async (req: Request, res: Response, next: NextFunction) => {
+selfServiceRouter.post('/km-logs/:id/approve', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = z.object({ companyId: z.string() }).parse(req.query)
     const data = await service.approveKmLog(req.params.id, companyId, req.user!.id)
@@ -106,7 +109,7 @@ selfServiceRouter.post('/km-logs/:id/approve', async (req: Request, res: Respons
   } catch (err) { next(err) }
 })
 
-selfServiceRouter.post('/km-logs/:id/reject', async (req: Request, res: Response, next: NextFunction) => {
+selfServiceRouter.post('/km-logs/:id/reject', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = z.object({ companyId: z.string() }).parse(req.query)
     const { reason } = z.object({ reason: z.string().min(1) }).parse(req.body)

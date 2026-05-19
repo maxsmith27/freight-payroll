@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate } from '../../middleware/auth.middleware.js'
+import { authenticate, requireCompanyAccess } from '../../middleware/auth.middleware.js'
 import { validateBody, validateQuery } from '../../middleware/validate.middleware.js'
 import * as service from './timeAttendance.service.js'
 
@@ -8,8 +8,10 @@ export const timeAttendanceRouter = Router()
 timeAttendanceRouter.use(authenticate)
 
 const companyQuery = z.object({ companyId: z.string() })
+const cq = (req: Request) => req.query.companyId as string
+const managerAccess = requireCompanyAccess(cq, 'COMPANY_ADMIN', 'PAYROLL_MANAGER', 'DEPOT_MANAGER', 'SUPERVISOR')
 
-timeAttendanceRouter.post('/clock-in', validateBody(service.clockInSchema), async (req: Request, res: Response, next: NextFunction) => {
+timeAttendanceRouter.post('/clock-in', managerAccess, validateBody(service.clockInSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const entry = await service.clockIn(companyId, req.body)
@@ -17,7 +19,7 @@ timeAttendanceRouter.post('/clock-in', validateBody(service.clockInSchema), asyn
   } catch (err) { next(err) }
 })
 
-timeAttendanceRouter.post('/entries/:id/clock-out', validateBody(service.clockOutSchema), async (req: Request, res: Response, next: NextFunction) => {
+timeAttendanceRouter.post('/entries/:id/clock-out', managerAccess, validateBody(service.clockOutSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const entry = await service.clockOut(companyId, req.params.id, req.body)
@@ -25,7 +27,7 @@ timeAttendanceRouter.post('/entries/:id/clock-out', validateBody(service.clockOu
   } catch (err) { next(err) }
 })
 
-timeAttendanceRouter.post('/entries/manual', validateBody(service.manualEntrySchema), async (req: Request, res: Response, next: NextFunction) => {
+timeAttendanceRouter.post('/entries/manual', managerAccess, validateBody(service.manualEntrySchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const entry = await service.addManualEntry(companyId, req.body, req.user!.id)
@@ -41,7 +43,7 @@ const listQuery = z.object({
   page: z.coerce.number().default(1),
 })
 
-timeAttendanceRouter.get('/timesheets', validateQuery(listQuery), async (req: Request, res: Response, next: NextFunction) => {
+timeAttendanceRouter.get('/timesheets', managerAccess, validateQuery(listQuery), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId, ...filters } = req.query as unknown as z.infer<typeof listQuery>
     const result = await service.listTimesheets(companyId, filters)
@@ -49,7 +51,7 @@ timeAttendanceRouter.get('/timesheets', validateQuery(listQuery), async (req: Re
   } catch (err) { next(err) }
 })
 
-timeAttendanceRouter.post('/timesheets/:id/submit', async (req: Request, res: Response, next: NextFunction) => {
+timeAttendanceRouter.post('/timesheets/:id/submit', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const ts = await service.submitTimesheet(req.params.id, companyId, req.user!.id)
@@ -57,7 +59,7 @@ timeAttendanceRouter.post('/timesheets/:id/submit', async (req: Request, res: Re
   } catch (err) { next(err) }
 })
 
-timeAttendanceRouter.post('/timesheets/:id/approve', async (req: Request, res: Response, next: NextFunction) => {
+timeAttendanceRouter.post('/timesheets/:id/approve', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const { notes } = z.object({ notes: z.string().optional() }).parse(req.body)
@@ -66,7 +68,7 @@ timeAttendanceRouter.post('/timesheets/:id/approve', async (req: Request, res: R
   } catch (err) { next(err) }
 })
 
-timeAttendanceRouter.post('/timesheets/:id/reject', async (req: Request, res: Response, next: NextFunction) => {
+timeAttendanceRouter.post('/timesheets/:id/reject', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const { notes } = z.object({ notes: z.string().min(1) }).parse(req.body)
@@ -75,7 +77,7 @@ timeAttendanceRouter.post('/timesheets/:id/reject', async (req: Request, res: Re
   } catch (err) { next(err) }
 })
 
-timeAttendanceRouter.get('/exceptions', async (req: Request, res: Response, next: NextFunction) => {
+timeAttendanceRouter.get('/exceptions', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const { weekStartDate } = z.object({ weekStartDate: z.string() }).parse(req.query)

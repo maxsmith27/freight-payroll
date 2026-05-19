@@ -76,6 +76,7 @@ export function requireCompanyAccess(
     }
 
     const companyId = getCompanyId(req)
+    if (!companyId) throw new ForbiddenError('Company ID is required')
     const access = req.user.companyAccess.find(a => a.companyId === companyId)
 
     if (!access) {

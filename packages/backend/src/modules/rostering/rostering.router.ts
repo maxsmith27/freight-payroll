@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate } from '../../middleware/auth.middleware.js'
+import { authenticate, requireCompanyAccess } from '../../middleware/auth.middleware.js'
 import { validateBody } from '../../middleware/validate.middleware.js'
 import * as service from './rostering.service.js'
 
@@ -8,8 +8,11 @@ export const rosteringRouter = Router()
 rosteringRouter.use(authenticate)
 
 const companyQuery = z.object({ companyId: z.string() })
+const cq = (req: Request) => req.query.companyId as string
+const managerAccess = requireCompanyAccess(cq, 'COMPANY_ADMIN', 'PAYROLL_MANAGER', 'DEPOT_MANAGER', 'SUPERVISOR')
+const supervisorAccess = requireCompanyAccess(cq, 'COMPANY_ADMIN', 'PAYROLL_MANAGER', 'DEPOT_MANAGER')
 
-rosteringRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
+rosteringRouter.get('/', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const result = await service.listRosters(companyId, Number(req.query.page ?? 1))
@@ -17,7 +20,7 @@ rosteringRouter.get('/', async (req: Request, res: Response, next: NextFunction)
   } catch (err) { next(err) }
 })
 
-rosteringRouter.post('/', validateBody(service.createRosterSchema), async (req: Request, res: Response, next: NextFunction) => {
+rosteringRouter.post('/', supervisorAccess, validateBody(service.createRosterSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const roster = await service.createRoster(companyId, req.body, req.user!.id)
@@ -25,7 +28,7 @@ rosteringRouter.post('/', validateBody(service.createRosterSchema), async (req: 
   } catch (err) { next(err) }
 })
 
-rosteringRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
+rosteringRouter.get('/:id', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const roster = await service.getRoster(req.params.id, companyId)
@@ -33,7 +36,7 @@ rosteringRouter.get('/:id', async (req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err) }
 })
 
-rosteringRouter.post('/:id/shifts', validateBody(service.createShiftSchema), async (req: Request, res: Response, next: NextFunction) => {
+rosteringRouter.post('/:id/shifts', supervisorAccess, validateBody(service.createShiftSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const shift = await service.addShift(req.params.id, companyId, req.body)
@@ -41,7 +44,7 @@ rosteringRouter.post('/:id/shifts', validateBody(service.createShiftSchema), asy
   } catch (err) { next(err) }
 })
 
-rosteringRouter.put('/:id/shifts/:shiftId', async (req: Request, res: Response, next: NextFunction) => {
+rosteringRouter.put('/:id/shifts/:shiftId', supervisorAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const shift = await service.updateShift(req.params.shiftId, companyId, req.body)
@@ -49,7 +52,7 @@ rosteringRouter.put('/:id/shifts/:shiftId', async (req: Request, res: Response, 
   } catch (err) { next(err) }
 })
 
-rosteringRouter.delete('/:id/shifts/:shiftId', async (req: Request, res: Response, next: NextFunction) => {
+rosteringRouter.delete('/:id/shifts/:shiftId', supervisorAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     await service.deleteShift(req.params.shiftId, companyId)
@@ -57,7 +60,7 @@ rosteringRouter.delete('/:id/shifts/:shiftId', async (req: Request, res: Respons
   } catch (err) { next(err) }
 })
 
-rosteringRouter.post('/:id/publish', async (req: Request, res: Response, next: NextFunction) => {
+rosteringRouter.post('/:id/publish', supervisorAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const roster = await service.publishRoster(req.params.id, companyId, req.user!.id)
@@ -65,7 +68,7 @@ rosteringRouter.post('/:id/publish', async (req: Request, res: Response, next: N
   } catch (err) { next(err) }
 })
 
-rosteringRouter.post('/copy', async (req: Request, res: Response, next: NextFunction) => {
+rosteringRouter.post('/copy', supervisorAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
     const { fromWeekStart, toWeekStart } = z.object({

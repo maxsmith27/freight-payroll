@@ -1,12 +1,17 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate } from '../../middleware/auth.middleware.js'
+import { authenticate, requireCompanyAccess } from '../../middleware/auth.middleware.js'
 import { validateBody, validateQuery } from '../../middleware/validate.middleware.js'
 import * as service from './employees.service.js'
 import { writeAuditLog } from '../../middleware/audit.middleware.js'
 
 export const employeesRouter = Router()
 employeesRouter.use(authenticate)
+
+const cq = (req: Request) => req.query.companyId as string
+const anyAccess    = requireCompanyAccess(cq)
+const payrollAccess = requireCompanyAccess(cq, 'COMPANY_ADMIN', 'PAYROLL_MANAGER')
+const adminAccess  = requireCompanyAccess(cq, 'COMPANY_ADMIN')
 
 // ─── List employees ────────────────────────────────────────────────────────
 
@@ -20,7 +25,7 @@ const listQuerySchema = z.object({
   pageSize: z.coerce.number().default(50),
 })
 
-employeesRouter.get('/', validateQuery(listQuerySchema), async (req: Request, res: Response, next: NextFunction) => {
+employeesRouter.get('/', anyAccess, validateQuery(listQuerySchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId, ...filters } = req.query as unknown as z.infer<typeof listQuerySchema>
     const result = await service.listEmployees(companyId, filters)
@@ -32,7 +37,7 @@ employeesRouter.get('/', validateQuery(listQuerySchema), async (req: Request, re
 
 const createQuerySchema = z.object({ companyId: z.string() })
 
-employeesRouter.post('/', validateBody(service.createEmployeeSchema), async (req: Request, res: Response, next: NextFunction) => {
+employeesRouter.post('/', payrollAccess, validateBody(service.createEmployeeSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
     const employee = await service.createEmployee(companyId, req.body, req.user!.id)
@@ -49,7 +54,7 @@ employeesRouter.post('/', validateBody(service.createEmployeeSchema), async (req
 
 // ─── Get employee ───────────────────────────────────────────────────────────
 
-employeesRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
+employeesRouter.get('/:id', anyAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
     const employee = await service.getEmployee(req.params.id, companyId)
@@ -59,7 +64,7 @@ employeesRouter.get('/:id', async (req: Request, res: Response, next: NextFuncti
 
 // ─── Update employee ────────────────────────────────────────────────────────
 
-employeesRouter.put('/:id', validateBody(service.updateEmployeeSchema), async (req: Request, res: Response, next: NextFunction) => {
+employeesRouter.put('/:id', payrollAccess, validateBody(service.updateEmployeeSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
     const employee = await service.updateEmployee(req.params.id, companyId, req.body, req.user!.id)
@@ -81,7 +86,7 @@ const terminateSchema = z.object({
   terminationReason: z.string().optional(),
 })
 
-employeesRouter.post('/:id/terminate', validateBody(terminateSchema), async (req: Request, res: Response, next: NextFunction) => {
+employeesRouter.post('/:id/terminate', adminAccess, validateBody(terminateSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
     const employee = await service.terminateEmployee(req.params.id, companyId, req.body)
@@ -98,7 +103,7 @@ employeesRouter.post('/:id/terminate', validateBody(terminateSchema), async (req
 
 // ─── Pay rates ──────────────────────────────────────────────────────────────
 
-employeesRouter.post('/:id/pay-rates', validateBody(service.payRateSchema), async (req: Request, res: Response, next: NextFunction) => {
+employeesRouter.post('/:id/pay-rates', payrollAccess, validateBody(service.payRateSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
     const rate = await service.addPayRate(req.params.id, companyId, req.body, req.user!.id)
@@ -108,7 +113,7 @@ employeesRouter.post('/:id/pay-rates', validateBody(service.payRateSchema), asyn
 
 // ─── Award classifications ──────────────────────────────────────────────────
 
-employeesRouter.post('/:id/classifications', validateBody(service.awardClassificationSchema), async (req: Request, res: Response, next: NextFunction) => {
+employeesRouter.post('/:id/classifications', payrollAccess, validateBody(service.awardClassificationSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
     const classification = await service.addAwardClassification(req.params.id, companyId, req.body, req.user!.id)
@@ -118,7 +123,7 @@ employeesRouter.post('/:id/classifications', validateBody(service.awardClassific
 
 // ─── Bank accounts ──────────────────────────────────────────────────────────
 
-employeesRouter.get('/:id/bank-accounts', async (req: Request, res: Response, next: NextFunction) => {
+employeesRouter.get('/:id/bank-accounts', payrollAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
     const accounts = await service.getBankAccounts(req.params.id, companyId)
@@ -126,7 +131,7 @@ employeesRouter.get('/:id/bank-accounts', async (req: Request, res: Response, ne
   } catch (err) { next(err) }
 })
 
-employeesRouter.post('/:id/bank-accounts', validateBody(service.bankAccountSchema), async (req: Request, res: Response, next: NextFunction) => {
+employeesRouter.post('/:id/bank-accounts', payrollAccess, validateBody(service.bankAccountSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
     const account = await service.addBankAccount(req.params.id, companyId, req.body)
@@ -145,7 +150,7 @@ const emergencyContactSchema = z.object({
   isPrimary: z.boolean().default(false),
 })
 
-employeesRouter.post('/:id/emergency-contacts', validateBody(emergencyContactSchema), async (req: Request, res: Response, next: NextFunction) => {
+employeesRouter.post('/:id/emergency-contacts', payrollAccess, validateBody(emergencyContactSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
     const contact = await service.addEmergencyContact(req.params.id, companyId, req.body)
@@ -159,7 +164,7 @@ employeesRouter.post('/:id/emergency-contacts', validateBody(emergencyContactSch
 
 const portalAccessSchema = z.object({ password: z.string().min(8) })
 
-employeesRouter.post('/:id/portal-access', validateBody(portalAccessSchema), async (req: Request, res: Response, next: NextFunction) => {
+employeesRouter.post('/:id/portal-access', adminAccess, validateBody(portalAccessSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
     const result = await service.grantPortalAccess(req.params.id, companyId, req.body.password)
@@ -167,7 +172,7 @@ employeesRouter.post('/:id/portal-access', validateBody(portalAccessSchema), asy
   } catch (err) { next(err) }
 })
 
-employeesRouter.delete('/:id/portal-access', async (req: Request, res: Response, next: NextFunction) => {
+employeesRouter.delete('/:id/portal-access', adminAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
     await service.revokePortalAccess(req.params.id, companyId)
@@ -177,7 +182,7 @@ employeesRouter.delete('/:id/portal-access', async (req: Request, res: Response,
 
 // ─── Import ────────────────────────────────────────────────────────────────
 
-employeesRouter.post('/import', async (req: Request, res: Response, next: NextFunction) => {
+employeesRouter.post('/import', payrollAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
     const { rows } = z.object({ rows: z.array(z.any()) }).parse(req.body)
