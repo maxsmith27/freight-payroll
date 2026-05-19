@@ -16,6 +16,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1048.0",
     "@freight-payroll/shared": "workspace:*",
     "@prisma/client": "^5.22.0",
+    "@sentry/node": "^10.53.1",
     "bcryptjs": "^2.4.3",
     "compression": "^1.7.4",
     "cors": "^2.8.5",

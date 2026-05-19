@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node'
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
@@ -102,5 +103,6 @@ app.use((_req, res) => {
 // ─── Error handler ──────────────────────────────────────────────────────────
 
 app.use(errorHandler)
+Sentry.setupExpressErrorHandler(app)
 
 export { app }

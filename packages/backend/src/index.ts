@@ -1,3 +1,6 @@
+import { initialiseSentry } from './lib/sentry.js'
+initialiseSentry()
+
 import { app } from './app.js'
 import { config } from './config/index.js'
 import { logger } from './lib/logger.js'

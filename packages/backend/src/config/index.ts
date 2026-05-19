@@ -29,6 +29,8 @@ const envSchema = z.object({
   SMS_DRIVER: z.enum(['console', 'twilio']).default('console'),
 
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
+
+  SENTRY_DSN: z.string().optional(),
 })
 
 function parseEnv() {
