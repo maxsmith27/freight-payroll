@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { LoginPage } from '@/pages/auth/LoginPage'
 import { RegisterPage } from '@/pages/auth/RegisterPage'
+import { SSOCallbackPage } from '@/pages/auth/SSOCallbackPage'
 import { DashboardPage } from '@/pages/dashboard/DashboardPage'
 import { EmployeesPage } from '@/pages/employees/EmployeesPage'
 import { NewEmployeePage } from '@/pages/employees/NewEmployeePage'
@@ -39,8 +40,9 @@ const PAYROLL_ROLES: CompanyRole[] = ['COMPANY_ADMIN', 'PAYROLL_MANAGER']
 const MANAGER_ROLES: CompanyRole[] = ['COMPANY_ADMIN', 'PAYROLL_MANAGER', 'DEPOT_MANAGER']
 
 const router = createBrowserRouter([
-  { path: '/login',    element: <LoginPage /> },
-  { path: '/register', element: <RegisterPage /> },
+  { path: '/login',         element: <LoginPage /> },
+  { path: '/register',      element: <RegisterPage /> },
+  { path: '/auth/callback', element: <SSOCallbackPage /> },
 
   // ── Employee self-service portal ─────────────────────────────────────────
   // Accessible by all authenticated users (employees land here automatically;

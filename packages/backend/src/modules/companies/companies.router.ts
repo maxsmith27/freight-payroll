@@ -9,6 +9,9 @@ import {
   updateCompany,
   createDepot,
   getDepots,
+  getCompanyUsers,
+  updateUserAccess,
+  updateUserAccessSchema,
   seedDefaultAllowances,
   createCompanySchema,
   createDepotSchema,
@@ -62,6 +65,22 @@ companiesRouter.post('/:id/depots', requireCompanyAccess(cp, 'COMPANY_ADMIN'), v
   try {
     const depot = await createDepot(req.params.id, req.user!.organizationId, req.body)
     res.status(201).json({ success: true, data: depot })
+  } catch (err) { next(err) }
+})
+
+// ─── User access management ──────────────────────────────────────────────────
+
+companiesRouter.get('/:id/users', requireCompanyAccess(cp, 'COMPANY_ADMIN'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const users = await getCompanyUsers(req.params.id)
+    res.json({ success: true, data: users })
+  } catch (err) { next(err) }
+})
+
+companiesRouter.patch('/:id/users/:userId/access', requireCompanyAccess(cp, 'COMPANY_ADMIN'), validateBody(updateUserAccessSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const access = await updateUserAccess(req.params.id, req.params.userId, req.body)
+    res.json({ success: true, data: access })
   } catch (err) { next(err) }
 })
 

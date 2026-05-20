@@ -181,16 +181,17 @@ export async function listTimesheets(
   companyId: string,
   filters: {
     employeeId?: string
+    depotId?: string
     status?: string
     weekStartDate?: string
     page?: number
     pageSize?: number
   } = {},
 ) {
-  const { employeeId, status, weekStartDate, page = 1, pageSize = 50 } = filters
+  const { employeeId, depotId, status, weekStartDate, page = 1, pageSize = 50 } = filters
 
   const where = {
-    employee: { companyId },
+    employee: { companyId, ...(depotId ? { depotId } : {}) },
     ...(employeeId ? { employeeId } : {}),
     ...(status ? { status: status as any } : {}),
     ...(weekStartDate ? { weekStartDate: new Date(weekStartDate) } : {}),
@@ -230,9 +231,10 @@ export async function approveTimesheet(
   companyId: string,
   approvedBy: string,
   notes?: string,
+  depotScope?: string | null,
 ) {
   const ts = await prisma.timesheet.findFirst({
-    where: { id, employee: { companyId }, status: { in: ['SUBMITTED', 'DRAFT'] } },
+    where: { id, employee: { companyId, ...(depotScope ? { depotId: depotScope } : {}) }, status: { in: ['SUBMITTED', 'DRAFT'] } },
   })
   if (!ts) throw new NotFoundError('Timesheet awaiting approval')
 
@@ -247,9 +249,10 @@ export async function rejectTimesheet(
   companyId: string,
   rejectedBy: string,
   notes: string,
+  depotScope?: string | null,
 ) {
   const ts = await prisma.timesheet.findFirst({
-    where: { id, employee: { companyId }, status: 'SUBMITTED' },
+    where: { id, employee: { companyId, ...(depotScope ? { depotId: depotScope } : {}) }, status: 'SUBMITTED' },
   })
   if (!ts) throw new NotFoundError('Submitted timesheet')
 

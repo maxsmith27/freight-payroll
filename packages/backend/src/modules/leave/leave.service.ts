@@ -65,9 +65,10 @@ export async function approveLeave(
   companyId: string,
   approvedBy: string,
   notes?: string,
+  depotScope?: string | null,
 ) {
   const request = await prisma.leaveRequest.findFirst({
-    where: { id, employee: { companyId }, status: 'PENDING' },
+    where: { id, employee: { companyId, ...(depotScope ? { depotId: depotScope } : {}) }, status: 'PENDING' },
   })
   if (!request) throw new NotFoundError('Leave request')
 
@@ -87,9 +88,10 @@ export async function declineLeave(
   companyId: string,
   declinedBy: string,
   notes: string,
+  depotScope?: string | null,
 ) {
   const request = await prisma.leaveRequest.findFirst({
-    where: { id, employee: { companyId }, status: 'PENDING' },
+    where: { id, employee: { companyId, ...(depotScope ? { depotId: depotScope } : {}) }, status: 'PENDING' },
   })
   if (!request) throw new NotFoundError('Leave request')
 
@@ -112,13 +114,13 @@ export async function declineLeave(
 
 export async function listLeaveRequests(
   companyId: string,
-  filters: { employeeId?: string; status?: string; page?: number } = {},
+  filters: { employeeId?: string; depotId?: string; status?: string; page?: number } = {},
 ) {
-  const { employeeId, status, page = 1 } = filters
+  const { employeeId, depotId, status, page = 1 } = filters
   const pageSize = 50
 
   const where = {
-    employee: { companyId },
+    employee: { companyId, ...(depotId ? { depotId } : {}) },
     ...(employeeId ? { employeeId } : {}),
     ...(status ? { status: status as any } : {}),
   }

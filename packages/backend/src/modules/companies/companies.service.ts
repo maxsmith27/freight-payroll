@@ -104,6 +104,63 @@ export async function getDepots(companyId: string) {
   })
 }
 
+// ─── User access management ───────────────────────────────────────────────────
+
+export async function getCompanyUsers(companyId: string) {
+  const [access, depots] = await Promise.all([
+    prisma.userCompanyAccess.findMany({
+      where: { companyId },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true, email: true, lastLoginAt: true, isActive: true } },
+      },
+      orderBy: [{ role: 'asc' }, { user: { lastName: 'asc' } }],
+    }),
+    prisma.depot.findMany({ where: { companyId, deletedAt: null }, select: { id: true, name: true } }),
+  ])
+
+  const depotMap = new Map(depots.map(d => [d.id, d.name]))
+
+  return access.map(a => ({
+    accessId: a.id,
+    id: a.user.id,
+    firstName: a.user.firstName,
+    lastName: a.user.lastName,
+    email: a.user.email,
+    isActive: a.user.isActive,
+    lastLoginAt: a.user.lastLoginAt,
+    role: a.role,
+    depotId: a.depotId,
+    depotName: a.depotId ? (depotMap.get(a.depotId) ?? null) : null,
+    enabledPages: a.enabledPages,
+  }))
+}
+
+export const updateUserAccessSchema = z.object({
+  role: z.enum(['COMPANY_ADMIN', 'PAYROLL_MANAGER', 'DEPOT_MANAGER', 'SUPERVISOR', 'EMPLOYEE']).optional(),
+  depotId: z.string().nullable().optional(),
+  enabledPages: z.array(z.string()).optional(),
+})
+
+export async function updateUserAccess(
+  companyId: string,
+  userId: string,
+  data: z.infer<typeof updateUserAccessSchema>,
+) {
+  const existing = await prisma.userCompanyAccess.findUnique({
+    where: { userId_companyId: { userId, companyId } },
+  })
+  if (!existing) throw new NotFoundError('User access record')
+
+  return prisma.userCompanyAccess.update({
+    where: { userId_companyId: { userId, companyId } },
+    data: {
+      ...(data.role !== undefined ? { role: data.role } : {}),
+      ...(data.depotId !== undefined ? { depotId: data.depotId } : {}),
+      ...(data.enabledPages !== undefined ? { enabledPages: data.enabledPages } : {}),
+    },
+  })
+}
+
 export async function seedDefaultAllowances(companyId: string) {
   const defaults = [
     { code: 'MEAL', name: 'Meal Allowance', isTaxable: true, stpCategory: 'MealAllowance', defaultAmount: 17.03 },

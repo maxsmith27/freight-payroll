@@ -15,6 +15,7 @@ import { logger } from './lib/logger.js'
 
 // Route modules
 import { authRouter } from './modules/auth/auth.router.js'
+import { ssoRouter } from './modules/auth/sso.router.js'
 import { employeesRouter } from './modules/employees/employees.router.js'
 import { companiesRouter } from './modules/companies/companies.router.js'
 import { payrollRouter } from './modules/payroll/payroll.router.js'
@@ -24,6 +25,7 @@ import { rosteringRouter } from './modules/rostering/rostering.router.js'
 import { complianceRouter } from './modules/compliance/compliance.router.js'
 import { reportsRouter } from './modules/reports/reports.router.js'
 import { selfServiceRouter } from './modules/selfService/selfService.router.js'
+import { ratesRouter } from './modules/admin/rates.router.js'
 
 const app = express()
 
@@ -72,6 +74,7 @@ app.get('/health', (_req, res) => {
 // ─── API Routes ─────────────────────────────────────────────────────────────
 
 app.use('/api/v1/auth', authLimiter, authRouter)
+app.use('/api/v1/auth/sso', ssoRouter)
 app.use('/api/v1/companies', requestAuditLogger, companiesRouter)
 app.use('/api/v1/employees', requestAuditLogger, employeesRouter)
 app.use('/api/v1/payroll', requestAuditLogger, payrollRouter)
@@ -81,6 +84,7 @@ app.use('/api/v1/roster', requestAuditLogger, rosteringRouter)
 app.use('/api/v1/compliance', requestAuditLogger, complianceRouter)
 app.use('/api/v1/reports', reportsRouter)
 app.use('/api/v1/self-service', selfServiceRouter)
+app.use('/api/v1/admin/rates', ratesRouter)
 
 // ─── Local file serving (dev only) ──────────────────────────────────────────
 // In production, files are served via S3 pre-signed URLs; this route is never reached.

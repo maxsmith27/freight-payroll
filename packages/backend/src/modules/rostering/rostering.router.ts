@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate, requireCompanyAccess } from '../../middleware/auth.middleware.js'
+import { authenticate, requireCompanyAccess, getDepotScope } from '../../middleware/auth.middleware.js'
 import { validateBody } from '../../middleware/validate.middleware.js'
 import * as service from './rostering.service.js'
 
@@ -15,7 +15,8 @@ const supervisorAccess = requireCompanyAccess(cq, 'COMPANY_ADMIN', 'PAYROLL_MANA
 rosteringRouter.get('/', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
-    const result = await service.listRosters(companyId, Number(req.query.page ?? 1))
+    const depotScope = getDepotScope(req, companyId)
+    const result = await service.listRosters(companyId, Number(req.query.page ?? 1), depotScope)
     res.json({ success: true, ...result })
   } catch (err) { next(err) }
 })

@@ -6,35 +6,37 @@ import {
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth.store'
 import { api } from '@/lib/api'
-import { useCompanyRole, ROLE_LABELS, isPayrollRole, isManagerRole, isSupervisorOrAbove } from '@/lib/roles'
-import type { CompanyRole } from '@freight-payroll/shared'
+import { useCompanyRole, usePageEnabled, ROLE_LABELS, isPayrollRole, isSupervisorOrAbove } from '@/lib/roles'
+import { ADMIN_PAGES } from '@freight-payroll/shared'
+import type { CompanyRole, AdminPageKey } from '@freight-payroll/shared'
 
 type NavItem = {
   to: string
   label: string
   icon: React.ElementType
-  show?: (role: CompanyRole | null) => boolean
+  pageKey: AdminPageKey
 }
 
 const navItems: NavItem[] = [
-  { to: '/dashboard',         label: 'Dashboard',          icon: LayoutDashboard },
-  { to: '/employees',         label: 'Employees',           icon: Users },
-  { to: '/payroll',           label: 'Payroll',             icon: DollarSign,  show: isPayrollRole },
-  { to: '/time-attendance',   label: 'Time & Attendance',   icon: Clock },
-  { to: '/km-log-approvals',  label: 'KM Log Approvals',    icon: MapPin },
-  { to: '/leave',             label: 'Leave',               icon: Calendar },
-  { to: '/roster',            label: 'Roster',              icon: Calendar },
-  { to: '/compliance',        label: 'Compliance',          icon: Shield },
-  { to: '/reports',           label: 'Reports',             icon: BarChart3,   show: isManagerRole },
+  { to: '/dashboard',         label: 'Dashboard',          icon: LayoutDashboard, pageKey: ADMIN_PAGES.DASHBOARD },
+  { to: '/employees',         label: 'Employees',           icon: Users,           pageKey: ADMIN_PAGES.EMPLOYEES },
+  { to: '/payroll',           label: 'Payroll',             icon: DollarSign,      pageKey: ADMIN_PAGES.PAYROLL },
+  { to: '/time-attendance',   label: 'Time & Attendance',   icon: Clock,           pageKey: ADMIN_PAGES.TIME_ATTENDANCE },
+  { to: '/km-log-approvals',  label: 'KM Log Approvals',    icon: MapPin,          pageKey: ADMIN_PAGES.KM_LOG_APPROVALS },
+  { to: '/leave',             label: 'Leave',               icon: Calendar,        pageKey: ADMIN_PAGES.LEAVE },
+  { to: '/roster',            label: 'Roster',              icon: Calendar,        pageKey: ADMIN_PAGES.ROSTER },
+  { to: '/compliance',        label: 'Compliance',          icon: Shield,          pageKey: ADMIN_PAGES.COMPLIANCE },
+  { to: '/reports',           label: 'Reports',             icon: BarChart3,       pageKey: ADMIN_PAGES.REPORTS },
 ]
 
 export function Sidebar() {
   const { user, activeCompanyId, logout } = useAuthStore()
   const navigate = useNavigate()
   const role = useCompanyRole()
+  const pageEnabled = usePageEnabled
 
   const activeCompany = user?.companyAccess.find(c => c.companyId === activeCompanyId)
-  const visibleItems = navItems.filter(item => !item.show || item.show(role))
+  const visibleItems = navItems.filter(item => pageEnabled(item.pageKey))
 
   async function handleLogout() {
     try { await api.post('/auth/logout') } catch {}
@@ -112,7 +114,7 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="border-t border-slate-700 px-3 py-3 space-y-0.5">
-        {isPayrollRole(role) && (
+        {pageEnabled(ADMIN_PAGES.SETTINGS) && (
           <NavLink
             to="/settings"
             className={({ isActive }) =>

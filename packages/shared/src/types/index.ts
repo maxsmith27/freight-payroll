@@ -159,6 +159,7 @@ export interface CompanyAccess {
   companyName: string
   role: CompanyRole
   depotId?: string
+  enabledPages: string[] // empty = role defaults; non-empty = only these pages visible
 }
 
 // ─────────────────────────────────────────────────────────────────

@@ -2,20 +2,25 @@ import { Outlet, Navigate, NavLink, useNavigate } from 'react-router-dom'
 import { Truck, LayoutDashboard, Clock, MapPin, Calendar, FileText, LogOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth.store'
+import { usePageEnabled } from '@/lib/roles'
+import { ESS_PAGES } from '@freight-payroll/shared'
+import type { EssPageKey } from '@freight-payroll/shared'
 import { api } from '@/lib/api'
 import { Toaster } from '@/components/ui/toaster'
 
-const navItems = [
-  { to: '/employee/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/employee/timesheets', label: 'My Timesheets', icon: Clock },
-  { to: '/employee/km-log', label: 'KM Log', icon: MapPin },
-  { to: '/employee/leave', label: 'Leave', icon: Calendar },
-  { to: '/employee/payslips', label: 'Payslips', icon: FileText },
+const allNavItems = [
+  { to: '/employee/dashboard',  label: 'Dashboard',      icon: LayoutDashboard, pageKey: ESS_PAGES.DASHBOARD  as EssPageKey },
+  { to: '/employee/timesheets', label: 'My Timesheets',  icon: Clock,           pageKey: ESS_PAGES.TIMESHEETS as EssPageKey },
+  { to: '/employee/km-log',     label: 'KM Log',         icon: MapPin,          pageKey: ESS_PAGES.KM_LOG     as EssPageKey },
+  { to: '/employee/leave',      label: 'Leave',          icon: Calendar,        pageKey: ESS_PAGES.LEAVE      as EssPageKey },
+  { to: '/employee/payslips',   label: 'Payslips',       icon: FileText,        pageKey: ESS_PAGES.PAYSLIPS   as EssPageKey },
 ]
 
 export function EmployeePortalLayout() {
   const { isAuthenticated, user, logout } = useAuthStore()
   const navigate = useNavigate()
+  const pageEnabled = usePageEnabled
+  const navItems = allNavItems.filter(item => pageEnabled(item.pageKey))
 
   if (!isAuthenticated) return <Navigate to="/login" replace />
 

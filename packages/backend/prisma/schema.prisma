@@ -163,6 +163,7 @@ model User {
 
   refreshTokens RefreshToken[]
   companyAccess UserCompanyAccess[]
+  oauthAccounts OAuthAccount[]
 
   @@index([organizationId])
   @@index([email])
@@ -170,13 +171,14 @@ model User {
 }
 
 model UserCompanyAccess {
-  id        String      @id @default(cuid())
-  userId    String
-  user      User        @relation(fields: [userId], references: [id])
-  companyId String
-  company   Company     @relation(fields: [companyId], references: [id])
-  role      CompanyRole
-  depotId   String? // null = access to all depots in this company
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id])
+  companyId    String
+  company      Company     @relation(fields: [companyId], references: [id])
+  role         CompanyRole
+  depotId      String? // null = access to all depots in this company
+  enabledPages String[]    // empty = role defaults; non-empty = only these pages shown
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -185,6 +187,21 @@ model UserCompanyAccess {
   @@index([userId])
   @@index([companyId])
   @@map("user_company_access")
+}
+
+model OAuthAccount {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String   // 'google' | 'microsoft'
+  providerAccountId String
+  email             String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("oauth_accounts")
 }
 
 model RefreshToken {

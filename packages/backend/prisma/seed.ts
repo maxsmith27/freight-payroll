@@ -31,7 +31,7 @@ async function main() {
     },
   })
 
-  // --- Depot ---
+  // --- Depots ---
   const depot = await prisma.depot.upsert({
     where: { companyId_code: { companyId: company.id, code: 'SYD' } },
     update: {},
@@ -47,51 +47,107 @@ async function main() {
     },
   })
 
-  // --- Admin user ---
-  const adminHash = await bcrypt.hash('Password123!', 10)
+  const depot2 = await prisma.depot.upsert({
+    where: { companyId_code: { companyId: company.id, code: 'MEL' } },
+    update: {},
+    create: {
+      id: 'seed-depot-02',
+      companyId: company.id,
+      name: 'Melbourne Depot',
+      code: 'MEL',
+      addressState: 'VIC',
+      addressStreet: '42 Transport Drive',
+      addressSuburb: 'Laverton North',
+      addressPostcode: '3026',
+    },
+  })
+
+  const pw = 'Password123!'
+  const hash = await bcrypt.hash(pw, 10)
+
+  // --- Company Admin ---
   const admin = await prisma.user.upsert({
     where: { email: 'admin@demo.freightpayroll.com.au' },
     update: {},
     create: {
+      id: 'seed-user-admin',
       email: 'admin@demo.freightpayroll.com.au',
-      passwordHash: adminHash,
+      passwordHash: hash,
       firstName: 'Admin',
       lastName: 'User',
       globalRole: GlobalRole.SUPER_ADMIN,
       organizationId: org.id,
     },
   })
-
   await prisma.userCompanyAccess.upsert({
     where: { userId_companyId: { userId: admin.id, companyId: company.id } },
     update: {},
     create: { userId: admin.id, companyId: company.id, role: CompanyRole.COMPANY_ADMIN },
   })
 
-  console.log('  Created admin: admin@demo.freightpayroll.com.au / Password123!')
-
-  // --- Payroll manager ---
-  const pmHash = await bcrypt.hash('Password123!', 10)
+  // --- Payroll Manager ---
   const pm = await prisma.user.upsert({
     where: { email: 'payroll@demo.freightpayroll.com.au' },
     update: {},
     create: {
+      id: 'seed-user-pm',
       email: 'payroll@demo.freightpayroll.com.au',
-      passwordHash: pmHash,
+      passwordHash: hash,
       firstName: 'Sarah',
       lastName: 'Chen',
-      globalRole: GlobalRole.USER,
+      globalRole: GlobalRole.ORG_USER,
       organizationId: org.id,
     },
   })
-
   await prisma.userCompanyAccess.upsert({
     where: { userId_companyId: { userId: pm.id, companyId: company.id } },
     update: {},
     create: { userId: pm.id, companyId: company.id, role: CompanyRole.PAYROLL_MANAGER },
   })
 
+  // --- Depot Manager (Sydney) ---
+  const dm = await prisma.user.upsert({
+    where: { email: 'depot.manager@demo.freightpayroll.com.au' },
+    update: {},
+    create: {
+      id: 'seed-user-dm',
+      email: 'depot.manager@demo.freightpayroll.com.au',
+      passwordHash: hash,
+      firstName: 'Tom',
+      lastName: 'Richards',
+      globalRole: GlobalRole.ORG_USER,
+      organizationId: org.id,
+    },
+  })
+  await prisma.userCompanyAccess.upsert({
+    where: { userId_companyId: { userId: dm.id, companyId: company.id } },
+    update: {},
+    create: { userId: dm.id, companyId: company.id, role: CompanyRole.DEPOT_MANAGER, depotId: depot.id },
+  })
+
+  // --- Supervisor (Sydney — scoped to their team) ---
+  const sup = await prisma.user.upsert({
+    where: { email: 'supervisor@demo.freightpayroll.com.au' },
+    update: {},
+    create: {
+      id: 'seed-user-sup',
+      email: 'supervisor@demo.freightpayroll.com.au',
+      passwordHash: hash,
+      firstName: 'Lisa',
+      lastName: 'Park',
+      globalRole: GlobalRole.ORG_USER,
+      organizationId: org.id,
+    },
+  })
+  await prisma.userCompanyAccess.upsert({
+    where: { userId_companyId: { userId: sup.id, companyId: company.id } },
+    update: {},
+    create: { userId: sup.id, companyId: company.id, role: CompanyRole.SUPERVISOR, depotId: depot.id },
+  })
+
   // --- Employees ---
+  // EMP001-003 are in Sydney depot (visible to supervisor + depot manager)
+  // EMP004 is in Melbourne depot (NOT visible to Sydney-scoped users)
   const employees = [
     {
       id: 'seed-emp-01',
@@ -113,6 +169,8 @@ async function main() {
       superFundName: 'AustralianSuper',
       superMemberNumber: 'AS123456',
       licenceClass: LicenceClass.HC,
+      depotId: depot.id,
+      portalEmail: 'employee1@demo.freightpayroll.com.au',
     },
     {
       id: 'seed-emp-02',
@@ -134,6 +192,8 @@ async function main() {
       superFundName: 'Hostplus',
       superMemberNumber: 'HP789012',
       licenceClass: LicenceClass.MC,
+      depotId: depot.id,
+      portalEmail: null,
     },
     {
       id: 'seed-emp-03',
@@ -155,11 +215,36 @@ async function main() {
       superFundName: 'Cbus',
       superMemberNumber: 'CB345678',
       licenceClass: LicenceClass.HR,
+      depotId: depot.id,
+      portalEmail: null,
+    },
+    {
+      id: 'seed-emp-04',
+      employeeNumber: 'EMP004',
+      firstName: 'Rachel',
+      lastName: 'Thompson',
+      email: 'rachel.thompson@demo.com.au',
+      employmentType: EmploymentType.FULL_TIME,
+      startDate: new Date('2023-06-01'),
+      payFrequency: PayFrequency.WEEKLY,
+      awardCode: AwardCode.MA000038,
+      classificationLevel: AwardClassificationLevel.GRADE_3,
+      payType: PayType.HOURLY,
+      baseRate: 29.50,
+      taxFileNumber: '321654987',
+      taxResidencyStatus: TaxResidencyStatus.RESIDENT,
+      claimsTaxFreeThreshold: true,
+      hasHECSDebt: false,
+      superFundName: 'REST',
+      superMemberNumber: 'RE111222',
+      licenceClass: LicenceClass.HC,
+      depotId: depot2.id,
+      portalEmail: null,
     },
   ]
 
   for (const empData of employees) {
-    const { licenceClass, payType, baseRate, classificationLevel, taxFileNumber, hasHECSDebt, ...empFields } = empData
+    const { licenceClass, payType, baseRate, classificationLevel, taxFileNumber, hasHECSDebt, depotId: empDepotId, portalEmail, ...empFields } = empData
 
     const emp = await prisma.employee.upsert({
       where: { id: empData.id },
@@ -169,7 +254,7 @@ async function main() {
         taxFileNumber,
         hasHECSDebt,
         companyId: company.id,
-        depotId: depot.id,
+        depotId: empDepotId,
         isActive: true,
       },
     })
@@ -241,6 +326,27 @@ async function main() {
       })
     }
 
+    // Portal login (EMPLOYEE role) for employees that have one
+    if (portalEmail) {
+      const existing = await prisma.user.findUnique({ where: { email: portalEmail } })
+      if (!existing) {
+        await prisma.user.create({
+          data: {
+            email: portalEmail,
+            passwordHash: hash,
+            firstName: emp.firstName,
+            lastName: emp.lastName,
+            globalRole: GlobalRole.ORG_USER,
+            organizationId: org.id,
+            employeeId: emp.id,
+            companyAccess: {
+              create: { companyId: company.id, role: CompanyRole.EMPLOYEE },
+            },
+          },
+        })
+      }
+    }
+
     console.log(`  Created employee: ${empData.firstName} ${empData.lastName} (${empData.employeeNumber})`)
   }
 
@@ -249,9 +355,13 @@ async function main() {
   await seedRates()
 
   console.log('\nSeed complete.')
-  console.log('\nLogin credentials:')
-  console.log('  Admin:   admin@demo.freightpayroll.com.au / Password123!')
-  console.log('  Payroll: payroll@demo.freightpayroll.com.au / Password123!')
+  console.log('\n─── Test login credentials (all use Password123!) ───────────────────')
+  console.log('  COMPANY_ADMIN    admin@demo.freightpayroll.com.au     → full access, all depots')
+  console.log('  PAYROLL_MANAGER  payroll@demo.freightpayroll.com.au   → payroll + reports, all depots')
+  console.log('  DEPOT_MANAGER    depot.manager@demo.freightpayroll.com.au → Sydney depot only, no payroll')
+  console.log('  SUPERVISOR       supervisor@demo.freightpayroll.com.au   → Sydney depot only, approve/reject only')
+  console.log('  EMPLOYEE (ESS)   employee1@demo.freightpayroll.com.au    → employee portal only (James Wilson)')
+  console.log('─────────────────────────────────────────────────────────────────────')
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

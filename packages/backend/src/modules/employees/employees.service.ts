@@ -135,9 +135,9 @@ export async function listEmployees(companyId: string, filters: EmployeeListFilt
   }
 }
 
-export async function getEmployee(id: string, companyId: string) {
+export async function getEmployee(id: string, companyId: string, depotScope?: string | null) {
   const employee = await prisma.employee.findFirst({
-    where: { id, companyId, deletedAt: null },
+    where: { id, companyId, deletedAt: null, ...(depotScope ? { depotId: depotScope } : {}) },
     include: {
       depot: true,
       payRates: { orderBy: { effectiveFrom: 'desc' } },
@@ -269,8 +269,9 @@ export async function updateEmployee(
   companyId: string,
   data: z.infer<typeof updateEmployeeSchema>,
   updatedBy: string,
+  depotScope?: string | null,
 ) {
-  const employee = await prisma.employee.findFirst({ where: { id, companyId, deletedAt: null } })
+  const employee = await prisma.employee.findFirst({ where: { id, companyId, deletedAt: null, ...(depotScope ? { depotId: depotScope } : {}) } })
   if (!employee) throw new NotFoundError('Employee')
 
   const { taxFileNumber, ...rest } = data
@@ -290,8 +291,9 @@ export async function terminateEmployee(
   id: string,
   companyId: string,
   data: { endDate: string; terminationReason?: string },
+  depotScope?: string | null,
 ) {
-  const employee = await prisma.employee.findFirst({ where: { id, companyId, deletedAt: null } })
+  const employee = await prisma.employee.findFirst({ where: { id, companyId, deletedAt: null, ...(depotScope ? { depotId: depotScope } : {}) } })
   if (!employee) throw new NotFoundError('Employee')
 
   return prisma.employee.update({
@@ -311,8 +313,9 @@ export async function addPayRate(
   companyId: string,
   data: z.infer<typeof payRateSchema>,
   createdBy: string,
+  depotScope?: string | null,
 ) {
-  const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId } })
+  const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId, ...(depotScope ? { depotId: depotScope } : {}) } })
   if (!employee) throw new NotFoundError('Employee')
 
   const effectiveFrom = new Date(data.effectiveFrom)
@@ -344,8 +347,9 @@ export async function addAwardClassification(
   companyId: string,
   data: z.infer<typeof awardClassificationSchema>,
   createdBy: string,
+  depotScope?: string | null,
 ) {
-  const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId } })
+  const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId, ...(depotScope ? { depotId: depotScope } : {}) } })
   if (!employee) throw new NotFoundError('Employee')
 
   const effectiveFrom = new Date(data.effectiveFrom)
@@ -367,8 +371,9 @@ export async function addBankAccount(
   employeeId: string,
   companyId: string,
   data: z.infer<typeof bankAccountSchema>,
+  depotScope?: string | null,
 ) {
-  const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId } })
+  const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId, ...(depotScope ? { depotId: depotScope } : {}) } })
   if (!employee) throw new NotFoundError('Employee')
 
   if (data.isPrimary) {
@@ -391,8 +396,8 @@ export async function addBankAccount(
   })
 }
 
-export async function getBankAccounts(employeeId: string, companyId: string) {
-  const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId } })
+export async function getBankAccounts(employeeId: string, companyId: string, depotScope?: string | null) {
+  const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId, ...(depotScope ? { depotId: depotScope } : {}) } })
   if (!employee) throw new NotFoundError('Employee')
 
   const accounts = await prisma.bankAccount.findMany({ where: { employeeId } })
@@ -416,8 +421,9 @@ export async function addEmergencyContact(
     email?: string
     isPrimary?: boolean
   },
+  depotScope?: string | null,
 ) {
-  const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId } })
+  const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId, ...(depotScope ? { depotId: depotScope } : {}) } })
   if (!employee) throw new NotFoundError('Employee')
 
   if (data.isPrimary) {

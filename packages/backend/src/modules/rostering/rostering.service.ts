@@ -57,16 +57,17 @@ export async function getRoster(id: string, companyId: string) {
   return roster
 }
 
-export async function listRosters(companyId: string, page = 1) {
+export async function listRosters(companyId: string, page = 1, depotId?: string | null) {
+  const where = { companyId, ...(depotId ? { depotId } : {}) }
   const [rosters, total] = await Promise.all([
     prisma.roster.findMany({
-      where: { companyId },
+      where,
       include: { _count: { select: { shifts: true } } },
       orderBy: { weekStartDate: 'desc' },
       skip: (page - 1) * 20,
       take: 20,
     }),
-    prisma.roster.count({ where: { companyId } }),
+    prisma.roster.count({ where }),
   ])
   return { data: rosters, total, page, pageSize: 20, totalPages: Math.ceil(total / 20) }
 }

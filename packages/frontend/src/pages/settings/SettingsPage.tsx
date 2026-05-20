@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Loader2, Building2, Users, Lock } from 'lucide-react'
+import { Loader2, Building2, Users, Lock, ChevronDown, ChevronUp, ShieldCheck, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,6 +15,157 @@ import { useAuthStore } from '@/store/auth.store'
 import { api, apiError } from '@/lib/api'
 import { useToast } from '@/hooks/useToast'
 import { formatDate } from '@/lib/utils'
+import { ROLE_DEFAULT_PAGES, ESS_PAGES, ADMIN_PAGES, PAGE_LABELS } from '@freight-payroll/shared'
+import type { CompanyRole, PageKey } from '@freight-payroll/shared'
+
+interface CompanyUser {
+  accessId: string
+  id: string
+  firstName: string
+  lastName: string
+  email: string
+  isActive: boolean
+  lastLoginAt: string | null
+  role: CompanyRole
+  depotId: string | null
+  depotName: string | null
+  enabledPages: string[]
+}
+
+const ESS_PAGE_KEYS  = Object.values(ESS_PAGES)   as PageKey[]
+const ADMIN_PAGE_KEYS = Object.values(ADMIN_PAGES) as PageKey[]
+
+const ROLE_LABELS: Record<CompanyRole, string> = {
+  COMPANY_ADMIN: 'Company Admin',
+  PAYROLL_MANAGER: 'Payroll Manager',
+  DEPOT_MANAGER: 'Depot Manager',
+  SUPERVISOR: 'Supervisor',
+  EMPLOYEE: 'Employee',
+}
+
+function UserAccessRow({
+  u,
+  currentUserId,
+  companyId,
+}: {
+  u: CompanyUser
+  currentUserId: string
+  companyId: string
+}) {
+  const [open, setOpen] = useState(false)
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+
+  const roleDefaults = ROLE_DEFAULT_PAGES[u.role]
+  const effective: string[] = u.enabledPages.length > 0 ? u.enabledPages : roleDefaults
+
+  const mutation = useMutation({
+    mutationFn: (enabledPages: string[]) =>
+      api.patch(`/companies/${companyId}/users/${u.id}/access`, { enabledPages }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['company-users', companyId] })
+      toast({ title: 'Access updated' })
+    },
+    onError: (err) => toast({ title: 'Error', description: apiError(err), variant: 'destructive' }),
+  })
+
+  function toggle(key: PageKey) {
+    const current = u.enabledPages.length > 0 ? u.enabledPages : [...roleDefaults]
+    const next = current.includes(key)
+      ? current.filter(k => k !== key)
+      : [...current, key]
+    mutation.mutate(next)
+  }
+
+  function resetToDefaults() {
+    mutation.mutate([])
+  }
+
+  const essPages  = ESS_PAGE_KEYS.filter(k => roleDefaults.includes(k))
+  const adminPages = ADMIN_PAGE_KEYS.filter(k => roleDefaults.includes(k))
+  const hasCustom = u.enabledPages.length > 0
+
+  return (
+    <div className="border-b last:border-0">
+      <button
+        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
+        onClick={() => setOpen(v => !v)}
+      >
+        <div className="flex-1 min-w-0">
+          <span className="font-medium text-sm">
+            {u.firstName} {u.lastName}
+            {u.id === currentUserId && <Badge variant="secondary" className="ml-2 text-xs">You</Badge>}
+          </span>
+          <span className="ml-2 text-xs text-muted-foreground">{u.email}</span>
+        </div>
+        <Badge variant="outline" className="shrink-0">{ROLE_LABELS[u.role]}</Badge>
+        {hasCustom && <Badge variant="secondary" className="shrink-0 text-xs">Custom</Badge>}
+        {open ? <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 space-y-4 bg-muted/20">
+          {essPages.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 pt-3">Employee Portal (ESS)</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {essPages.map(key => (
+                  <label key={key} className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={effective.includes(key)}
+                      onChange={() => toggle(key)}
+                      disabled={mutation.isPending || u.id === currentUserId}
+                      className="h-4 w-4 rounded border-gray-300"
+                    />
+                    <span className="text-sm">{PAGE_LABELS[key]}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {adminPages.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Admin App</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {adminPages.map(key => (
+                  <label key={key} className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={effective.includes(key)}
+                      onChange={() => toggle(key)}
+                      disabled={mutation.isPending || u.id === currentUserId}
+                      className="h-4 w-4 rounded border-gray-300"
+                    />
+                    <span className="text-sm">{PAGE_LABELS[key]}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-3 pt-1">
+            {hasCustom && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={resetToDefaults}
+                disabled={mutation.isPending || u.id === currentUserId}
+              >
+                Reset to role defaults
+              </Button>
+            )}
+            {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            {u.id === currentUserId && (
+              <p className="text-xs text-muted-foreground">You cannot edit your own access.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 interface CompanySettings {
   id: string
@@ -61,6 +212,134 @@ const passwordSchema = z.object({
 
 type PasswordForm = z.infer<typeof passwordSchema>
 
+// ─── Rate Verification Panel ────────────────────────────────────────────────
+
+interface RateStatus {
+  ok: boolean
+  detail: string
+}
+
+interface RateVerificationResult {
+  financialYear: string
+  verifiedAt: string | null
+  verifiedBy: string | null
+  superRate: RateStatus & { dbValue: number | null; referenceValue: number }
+  superMaxBase: RateStatus & { dbValue: number | null; referenceValue: number }
+  paygBracketCount: RateStatus & { dbCount: number; referenceCount: number }
+  overallOk: boolean
+}
+
+function StatusIcon({ ok, warn }: { ok: boolean; warn?: boolean }) {
+  if (ok) return <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+  if (warn) return <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+  return <XCircle className="h-4 w-4 text-destructive shrink-0" />
+}
+
+function RateVerificationPanel() {
+  const { toast } = useToast()
+  const queryClient = useQueryClient()
+  const FY = '2025-26'
+
+  const { data, isLoading } = useQuery<RateVerificationResult>({
+    queryKey: ['rate-verification', FY],
+    queryFn: async () => {
+      const r = await api.get(`/admin/rates/verify?fy=${FY}`)
+      return r.data.data
+    },
+  })
+
+  const markVerified = useMutation({
+    mutationFn: async () => {
+      await api.post('/admin/rates/verify', { financialYear: FY })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rate-verification'] })
+      toast({ title: 'Rates marked as verified' })
+    },
+    onError: (err: unknown) => {
+      toast({ title: 'Error', description: apiError(err), variant: 'destructive' })
+    },
+  })
+
+  const checks = data ? [
+    { label: 'Superannuation rate', ...data.superRate },
+    { label: 'Super max contribution base', ...data.superMaxBase },
+    { label: 'PAYG withholding brackets', ...data.paygBracketCount,
+      ok: data.paygBracketCount.ok, detail: data.paygBracketCount.detail },
+  ] : []
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold">ATO rate verification — FY {FY}</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Compares superannuation rates and PAYG withholding coefficients in the database against
+          the published ATO NAT 3539 and SG rate schedule for this financial year.
+          Once verified, sign off with your name so there's an audit trail.
+        </p>
+      </div>
+
+      <Card>
+        <CardContent className="p-0 divide-y">
+          {isLoading ? (
+            <div className="p-8 flex justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : data ? (
+            <>
+              {checks.map(c => (
+                <div key={c.label} className="flex items-start gap-3 px-4 py-3">
+                  <StatusIcon ok={c.ok} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">{c.label}</p>
+                    <p className="text-xs text-muted-foreground">{c.detail}</p>
+                  </div>
+                  <Badge variant={c.ok ? 'default' : 'destructive'} className="text-xs shrink-0">
+                    {c.ok ? 'OK' : 'Issue'}
+                  </Badge>
+                </div>
+              ))}
+
+              <div className="px-4 py-3 bg-muted/30">
+                {data.verifiedAt ? (
+                  <div className="flex items-center gap-2 text-sm text-green-700">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>
+                      Verified {formatDate(data.verifiedAt)} by {data.verifiedBy}
+                    </span>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Not yet verified for FY {FY}.</p>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              Unable to load rate data.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="flex items-center gap-3">
+        <Button
+          onClick={() => markVerified.mutate()}
+          disabled={markVerified.isPending || !data?.overallOk}
+        >
+          {markVerified.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+          <ShieldCheck className="h-4 w-4" />
+          Mark as verified
+        </Button>
+        {data && !data.overallOk && (
+          <p className="text-xs text-muted-foreground">
+            Resolve all issues before marking as verified.
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function SettingsPage() {
   const { activeCompanyId, user } = useAuthStore()
   const queryClient = useQueryClient()
@@ -75,13 +354,11 @@ export function SettingsPage() {
     enabled: !!activeCompanyId,
   })
 
-  const { data: users } = useQuery({
+  const { data: users } = useQuery<CompanyUser[]>({
     queryKey: ['company-users', activeCompanyId],
     queryFn: async () => {
       const { data } = await api.get(`/companies/${activeCompanyId}/users`)
-      return data.data as Array<{
-        id: string; firstName: string; lastName: string; email: string; role: string; lastLoginAt: string | null
-      }>
+      return data.data
     },
     enabled: !!activeCompanyId,
   })
@@ -151,6 +428,10 @@ export function SettingsPage() {
             <TabsTrigger value="account">
               <Lock className="h-4 w-4 mr-2" />
               Account
+            </TabsTrigger>
+            <TabsTrigger value="rates">
+              <ShieldCheck className="h-4 w-4 mr-2" />
+              Rate Verification
             </TabsTrigger>
           </TabsList>
 
@@ -242,44 +523,39 @@ export function SettingsPage() {
 
           {/* Users tab */}
           <TabsContent value="users">
-            <Card>
-              <CardContent className="p-0">
-                {!users ? (
-                  <div className="p-8 text-center text-sm text-muted-foreground">Loading users…</div>
-                ) : (
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b bg-muted/40">
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Email</th>
-                        <th className="px-4 py-3 text-center font-medium text-muted-foreground">Role</th>
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Last login</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {users.map(u => (
-                        <tr key={u.id} className="border-b last:border-0">
-                          <td className="px-4 py-3 font-medium">
-                            {u.firstName} {u.lastName}
-                            {u.id === user?.id && <Badge variant="secondary" className="ml-2 text-xs">You</Badge>}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground">{u.email}</td>
-                          <td className="px-4 py-3 text-center">
-                            <Badge variant="outline">{u.role.replace(/_/g, ' ')}</Badge>
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground text-xs">
-                            {u.lastLoginAt ? formatDate(u.lastLoginAt) : 'Never'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </CardContent>
-            </Card>
-            <p className="mt-4 text-xs text-muted-foreground">
-              User invitation and role management will be available in a future release.
-            </p>
+            <div className="max-w-3xl space-y-4">
+              <div>
+                <h2 className="text-sm font-semibold">User page access</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Click any user to expand and toggle which pages they can see. Unchecking a page hides it from their sidebar.
+                  Changes take effect on their next login.
+                </p>
+              </div>
+              <Card>
+                <CardContent className="p-0">
+                  {!users ? (
+                    <div className="p-8 text-center text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
+                      Loading users…
+                    </div>
+                  ) : users.length === 0 ? (
+                    <div className="p-8 text-center text-sm text-muted-foreground">No users found.</div>
+                  ) : (
+                    users.map(u => (
+                      <UserAccessRow
+                        key={u.id}
+                        u={u}
+                        currentUserId={user?.id ?? ''}
+                        companyId={activeCompanyId ?? ''}
+                      />
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+              <p className="text-xs text-muted-foreground">
+                Role assignments and depot scoping can be updated by contacting support. User invitation coming soon.
+              </p>
+            </div>
           </TabsContent>
 
           {/* Account / password tab */}
@@ -313,6 +589,11 @@ export function SettingsPage() {
                 </CardContent>
               </Card>
             </form>
+          </TabsContent>
+
+          {/* Rate Verification tab */}
+          <TabsContent value="rates">
+            <RateVerificationPanel />
           </TabsContent>
         </Tabs>
       </div>

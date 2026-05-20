@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate, requireCompanyAccess } from '../../middleware/auth.middleware.js'
+import { authenticate, requireCompanyAccess, getDepotScope } from '../../middleware/auth.middleware.js'
 import { validateBody, validateQuery } from '../../middleware/validate.middleware.js'
 import * as service from './timeAttendance.service.js'
 
@@ -38,6 +38,7 @@ timeAttendanceRouter.post('/entries/manual', managerAccess, validateBody(service
 const listQuery = z.object({
   companyId: z.string(),
   employeeId: z.string().optional(),
+  depotId: z.string().optional(),
   status: z.string().optional(),
   weekStartDate: z.string().optional(),
   page: z.coerce.number().default(1),
@@ -46,6 +47,8 @@ const listQuery = z.object({
 timeAttendanceRouter.get('/timesheets', managerAccess, validateQuery(listQuery), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId, ...filters } = req.query as unknown as z.infer<typeof listQuery>
+    const depotScope = getDepotScope(req, companyId)
+    if (depotScope) filters.depotId = depotScope
     const result = await service.listTimesheets(companyId, filters)
     res.json({ success: true, ...result })
   } catch (err) { next(err) }
@@ -63,7 +66,8 @@ timeAttendanceRouter.post('/timesheets/:id/approve', managerAccess, async (req: 
   try {
     const { companyId } = companyQuery.parse(req.query)
     const { notes } = z.object({ notes: z.string().optional() }).parse(req.body)
-    const ts = await service.approveTimesheet(req.params.id, companyId, req.user!.id, notes)
+    const depotScope = getDepotScope(req, companyId)
+    const ts = await service.approveTimesheet(req.params.id, companyId, req.user!.id, notes, depotScope)
     res.json({ success: true, data: ts })
   } catch (err) { next(err) }
 })
@@ -72,7 +76,8 @@ timeAttendanceRouter.post('/timesheets/:id/reject', managerAccess, async (req: R
   try {
     const { companyId } = companyQuery.parse(req.query)
     const { notes } = z.object({ notes: z.string().min(1) }).parse(req.body)
-    const ts = await service.rejectTimesheet(req.params.id, companyId, req.user!.id, notes)
+    const depotScope = getDepotScope(req, companyId)
+    const ts = await service.rejectTimesheet(req.params.id, companyId, req.user!.id, notes, depotScope)
     res.json({ success: true, data: ts })
   } catch (err) { next(err) }
 })

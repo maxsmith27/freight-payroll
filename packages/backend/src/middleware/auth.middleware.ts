@@ -92,6 +92,19 @@ export function requireCompanyAccess(
 }
 
 /**
+ * Returns the depot the user is scoped to for a given company, or null if unrestricted.
+ * COMPANY_ADMIN and PAYROLL_MANAGER are never depot-restricted even if depotId is set.
+ */
+export function getDepotScope(req: Request, companyId: string): string | null {
+  if (!req.user) return null
+  if (req.user.globalRole === 'SUPER_ADMIN') return null
+  const access = req.user.companyAccess.find(a => a.companyId === companyId)
+  if (!access) return null
+  if (access.role === 'COMPANY_ADMIN' || access.role === 'PAYROLL_MANAGER') return null
+  return access.depotId ?? null
+}
+
+/**
  * Check if the authenticated user has access to a specific company.
  */
 export function getUserCompanyRole(

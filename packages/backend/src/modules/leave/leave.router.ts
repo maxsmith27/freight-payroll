@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate, requireCompanyAccess } from '../../middleware/auth.middleware.js'
+import { authenticate, requireCompanyAccess, getDepotScope } from '../../middleware/auth.middleware.js'
 import { validateBody, validateQuery } from '../../middleware/validate.middleware.js'
 import * as service from './leave.service.js'
 
@@ -22,8 +22,10 @@ leaveRouter.post('/requests', managerAccess, validateBody(service.leaveRequestSc
 leaveRouter.get('/requests', managerAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = companyQuery.parse(req.query)
+    const depotScope = getDepotScope(req, companyId)
     const filters = {
       employeeId: req.query.employeeId as string,
+      depotId: depotScope ?? (req.query.depotId as string | undefined),
       status: req.query.status as string,
       page: Number(req.query.page ?? 1),
     }
@@ -36,7 +38,8 @@ leaveRouter.post('/requests/:id/approve', managerAccess, async (req: Request, re
   try {
     const { companyId } = companyQuery.parse(req.query)
     const { notes } = z.object({ notes: z.string().optional() }).parse(req.body)
-    const request = await service.approveLeave(req.params.id, companyId, req.user!.id, notes)
+    const depotScope = getDepotScope(req, companyId)
+    const request = await service.approveLeave(req.params.id, companyId, req.user!.id, notes, depotScope)
     res.json({ success: true, data: request })
   } catch (err) { next(err) }
 })
@@ -45,7 +48,8 @@ leaveRouter.post('/requests/:id/decline', managerAccess, async (req: Request, re
   try {
     const { companyId } = companyQuery.parse(req.query)
     const { notes } = z.object({ notes: z.string().min(1) }).parse(req.body)
-    const request = await service.declineLeave(req.params.id, companyId, req.user!.id, notes)
+    const depotScope = getDepotScope(req, companyId)
+    const request = await service.declineLeave(req.params.id, companyId, req.user!.id, notes, depotScope)
     res.json({ success: true, data: request })
   } catch (err) { next(err) }
 })

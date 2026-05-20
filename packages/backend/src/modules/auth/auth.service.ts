@@ -63,6 +63,7 @@ export async function login(input: LoginInput): Promise<{ tokens: AuthTokens; us
       companyName: a.company.name,
       role: a.role,
       depotId: a.depotId ?? undefined,
+      enabledPages: a.enabledPages,
     })),
   }
 
@@ -118,6 +119,7 @@ export async function refreshTokens(
       companyName: a.company.name,
       role: a.role,
       depotId: a.depotId ?? undefined,
+      enabledPages: a.enabledPages,
     })),
   }
 
@@ -200,7 +202,7 @@ export async function changePassword(
 
 // ─── Internal helpers ──────────────────────────────────────────────────────
 
-async function generateTokens(session: UserSession): Promise<AuthTokens> {
+export async function generateTokens(session: UserSession): Promise<AuthTokens> {
   const jti = uuidv4() // unique token ID for rotation tracking
 
   const accessToken = jwt.sign(

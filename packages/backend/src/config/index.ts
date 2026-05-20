@@ -22,6 +22,12 @@ const envSchema = z.object({
   AWS_REGION: z.string().default('ap-southeast-2'),
   AWS_S3_BUCKET: z.string().optional(),
 
+  // SSO — all optional; a provider is only active when both ID and secret are present
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  MICROSOFT_CLIENT_ID: z.string().optional(),
+  MICROSOFT_CLIENT_SECRET: z.string().optional(),
+
   EMAIL_DRIVER: z.enum(['console', 'sendgrid', 'ses']).default('console'),
   SENDGRID_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().optional(),

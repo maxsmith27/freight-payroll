@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate, requireCompanyAccess } from '../../middleware/auth.middleware.js'
+import { authenticate, requireCompanyAccess, getDepotScope } from '../../middleware/auth.middleware.js'
 import { validateBody, validateQuery } from '../../middleware/validate.middleware.js'
 import * as service from './employees.service.js'
 import { writeAuditLog } from '../../middleware/audit.middleware.js'
@@ -28,6 +28,9 @@ const listQuerySchema = z.object({
 employeesRouter.get('/', anyAccess, validateQuery(listQuerySchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId, ...filters } = req.query as unknown as z.infer<typeof listQuerySchema>
+    const depotScope = getDepotScope(req, companyId)
+    // Enforce depot scope: scoped users cannot query outside their assigned depot
+    if (depotScope) filters.depotId = depotScope
     const result = await service.listEmployees(companyId, filters)
     res.json({ success: true, ...result })
   } catch (err) { next(err) }
@@ -57,7 +60,8 @@ employeesRouter.post('/', payrollAccess, validateBody(service.createEmployeeSche
 employeesRouter.get('/:id', anyAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
-    const employee = await service.getEmployee(req.params.id, companyId)
+    const depotScope = getDepotScope(req, companyId)
+    const employee = await service.getEmployee(req.params.id, companyId, depotScope)
     res.json({ success: true, data: employee })
   } catch (err) { next(err) }
 })
@@ -67,7 +71,8 @@ employeesRouter.get('/:id', anyAccess, async (req: Request, res: Response, next:
 employeesRouter.put('/:id', payrollAccess, validateBody(service.updateEmployeeSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
-    const employee = await service.updateEmployee(req.params.id, companyId, req.body, req.user!.id)
+    const depotScope = getDepotScope(req, companyId)
+    const employee = await service.updateEmployee(req.params.id, companyId, req.body, req.user!.id, depotScope)
     await writeAuditLog(req, {
       action: 'UPDATE',
       entityType: 'Employee',
@@ -89,7 +94,8 @@ const terminateSchema = z.object({
 employeesRouter.post('/:id/terminate', adminAccess, validateBody(terminateSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
-    const employee = await service.terminateEmployee(req.params.id, companyId, req.body)
+    const depotScope = getDepotScope(req, companyId)
+    const employee = await service.terminateEmployee(req.params.id, companyId, req.body, depotScope)
     await writeAuditLog(req, {
       action: 'UPDATE',
       entityType: 'Employee',
@@ -106,7 +112,8 @@ employeesRouter.post('/:id/terminate', adminAccess, validateBody(terminateSchema
 employeesRouter.post('/:id/pay-rates', payrollAccess, validateBody(service.payRateSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
-    const rate = await service.addPayRate(req.params.id, companyId, req.body, req.user!.id)
+    const depotScope = getDepotScope(req, companyId)
+    const rate = await service.addPayRate(req.params.id, companyId, req.body, req.user!.id, depotScope)
     res.status(201).json({ success: true, data: rate })
   } catch (err) { next(err) }
 })
@@ -116,7 +123,8 @@ employeesRouter.post('/:id/pay-rates', payrollAccess, validateBody(service.payRa
 employeesRouter.post('/:id/classifications', payrollAccess, validateBody(service.awardClassificationSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
-    const classification = await service.addAwardClassification(req.params.id, companyId, req.body, req.user!.id)
+    const depotScope = getDepotScope(req, companyId)
+    const classification = await service.addAwardClassification(req.params.id, companyId, req.body, req.user!.id, depotScope)
     res.status(201).json({ success: true, data: classification })
   } catch (err) { next(err) }
 })
@@ -126,7 +134,8 @@ employeesRouter.post('/:id/classifications', payrollAccess, validateBody(service
 employeesRouter.get('/:id/bank-accounts', payrollAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
-    const accounts = await service.getBankAccounts(req.params.id, companyId)
+    const depotScope = getDepotScope(req, companyId)
+    const accounts = await service.getBankAccounts(req.params.id, companyId, depotScope)
     res.json({ success: true, data: accounts })
   } catch (err) { next(err) }
 })
@@ -134,7 +143,8 @@ employeesRouter.get('/:id/bank-accounts', payrollAccess, async (req: Request, re
 employeesRouter.post('/:id/bank-accounts', payrollAccess, validateBody(service.bankAccountSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
-    const account = await service.addBankAccount(req.params.id, companyId, req.body)
+    const depotScope = getDepotScope(req, companyId)
+    const account = await service.addBankAccount(req.params.id, companyId, req.body, depotScope)
     res.status(201).json({ success: true, data: account })
   } catch (err) { next(err) }
 })
@@ -153,7 +163,8 @@ const emergencyContactSchema = z.object({
 employeesRouter.post('/:id/emergency-contacts', payrollAccess, validateBody(emergencyContactSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { companyId } = createQuerySchema.parse(req.query)
-    const contact = await service.addEmergencyContact(req.params.id, companyId, req.body)
+    const depotScope = getDepotScope(req, companyId)
+    const contact = await service.addEmergencyContact(req.params.id, companyId, req.body, depotScope)
     res.status(201).json({ success: true, data: contact })
   } catch (err) { next(err) }
 })
