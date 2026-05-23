@@ -25,6 +25,16 @@ complianceRouter.get('/expiry-alerts', managerAccess, async (req: Request, res: 
   } catch (err) { next(err) }
 })
 
+// ─── Manual alert trigger (also called by daily scheduler) ──────────────────
+
+complianceRouter.post('/send-expiry-alerts', payrollAccess, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { companyId } = companyQuery.parse(req.query)
+    const result = await service.sendExpiryAlertEmails(companyId)
+    res.json({ success: true, data: result })
+  } catch (err) { next(err) }
+})
+
 // ─── Driver licences ─────────────────────────────────────────────────────────
 
 complianceRouter.post('/employees/:employeeId/licences', payrollAccess, validateBody(service.licenceSchema), async (req: Request, res: Response, next: NextFunction) => {

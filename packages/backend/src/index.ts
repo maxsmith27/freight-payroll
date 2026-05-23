@@ -5,6 +5,33 @@ import { app } from './app.js'
 import { config } from './config/index.js'
 import { logger } from './lib/logger.js'
 import prisma from './lib/prisma.js'
+import { sendAllComplianceAlerts } from './modules/compliance/compliance.service.js'
+
+// ─── Daily compliance alert scheduler ───────────────────────────────────────
+// Fires once per day. Calculates ms until next 08:00 AEST (UTC+10) so alerts
+// land in inboxes at the start of the business day, not 3am.
+function scheduleDailyComplianceAlerts() {
+  const now = new Date()
+  const nextRun = new Date(now)
+  // Target 22:00 UTC = 08:00 AEST (+10)
+  nextRun.setUTCHours(22, 0, 0, 0)
+  if (nextRun <= now) nextRun.setUTCDate(nextRun.getUTCDate() + 1)
+  const msUntilFirst = nextRun.getTime() - now.getTime()
+
+  setTimeout(() => {
+    sendAllComplianceAlerts().catch(err =>
+      logger.error('Daily compliance alert run failed', { error: err }),
+    )
+    // Repeat every 24 hours thereafter
+    setInterval(() => {
+      sendAllComplianceAlerts().catch(err =>
+        logger.error('Daily compliance alert run failed', { error: err }),
+      )
+    }, 24 * 60 * 60 * 1000)
+  }, msUntilFirst)
+
+  logger.info(`Compliance alerts scheduled — first run in ${Math.round(msUntilFirst / 60000)} minutes`)
+}
 
 async function main() {
   // Test DB connection
@@ -15,6 +42,11 @@ async function main() {
     logger.info(`🚛 Freight Payroll API running on port ${config.PORT}`)
     logger.info(`Environment: ${config.NODE_ENV}`)
   })
+
+  // Start daily compliance email scheduler (only in production to avoid noise in dev)
+  if (config.NODE_ENV === 'production') {
+    scheduleDailyComplianceAlerts()
+  }
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {

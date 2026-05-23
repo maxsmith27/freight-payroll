@@ -97,6 +97,17 @@ employeesRouter.put('/:id', payrollAccess, validateBody(service.updateEmployeeSc
   } catch (err) { next(err) }
 })
 
+// ─── Termination pay calculation (preview before confirming) ────────────────
+
+employeesRouter.get('/:id/termination-pay', payrollAccess, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { companyId } = createQuerySchema.parse(req.query)
+    const { endDate } = z.object({ endDate: z.string().min(1) }).parse(req.query)
+    const result = await service.calculateTerminationPay(req.params.id, companyId, endDate)
+    res.json({ success: true, data: result })
+  } catch (err) { next(err) }
+})
+
 // ─── Terminate employee ─────────────────────────────────────────────────────
 
 const terminateSchema = z.object({

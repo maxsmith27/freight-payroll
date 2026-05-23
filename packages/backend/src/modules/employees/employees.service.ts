@@ -328,6 +328,106 @@ export async function terminateEmployee(
   })
 }
 
+// ─── Termination pay calculation ─────────────────────────────────────────────
+// Calculates the leave payout amounts owed on termination.
+// This is a pre-confirmation estimate — it does not create a pay run.
+// Actual tax treatment of termination payments (ETP, genuine redundancy) is
+// handled when the final pay run is generated.
+
+export async function calculateTerminationPay(
+  id: string,
+  companyId: string,
+  endDate: string,
+) {
+  const employee = await prisma.employee.findFirst({
+    where: { id, companyId, deletedAt: null },
+    include: {
+      leaveBalances: true,
+      payRates: {
+        where: { effectiveTo: null },
+        orderBy: { effectiveFrom: 'desc' },
+        take: 1,
+      },
+    },
+  })
+  if (!employee) throw new NotFoundError('Employee')
+
+  const payRate = employee.payRates[0] ?? null
+
+  // Derive hourly rate from whatever pay type they're on
+  let hourlyRate: number | null = null
+  let payTypeNote = ''
+  if (payRate) {
+    switch (payRate.payType) {
+      case 'HOURLY':
+        hourlyRate = Number(payRate.hourlyRate)
+        break
+      case 'SALARY':
+        // Standard annualised salary ÷ 52 weeks ÷ 38 ordinary hours
+        hourlyRate = Number(payRate.annualSalary) / 52 / 38
+        payTypeNote = `Based on annual salary of $${Number(payRate.annualSalary).toLocaleString('en-AU', { minimumFractionDigits: 2 })} ÷ 52 ÷ 38`
+        break
+      default:
+        payTypeNote = 'Rate-per-km/load/revenue — leave payout must be calculated at ordinary rate. Contact your payroll manager.'
+    }
+  }
+
+  // Annual leave balance
+  const annualBalance = employee.leaveBalances.find(lb => lb.leaveType === 'ANNUAL')
+  const annualHours = annualBalance ? Number(annualBalance.balance) : 0
+
+  // Long service leave balance (informational only — state law varies)
+  const lslBalance = employee.leaveBalances.find(lb => lb.leaveType === 'LONG_SERVICE')
+  const lslHours = lslBalance ? Number(lslBalance.balance) : 0
+
+  // Annual leave payout
+  // Casuals: no annual leave payout (they receive casual loading instead)
+  // Full-time / part-time: ordinary rate + 17.5% loading (where applicable under the award)
+  const isCasual = employee.employmentType === 'CASUAL'
+  let annualLeavePayout = 0
+  let annualLeaveLoading = 0
+
+  if (!isCasual && hourlyRate !== null && annualHours > 0) {
+    annualLeavePayout = annualHours * hourlyRate
+    // 17.5% annual leave loading under MA000038 / MA000039 (does not apply to casuals or contractors)
+    const isContractor = employee.employmentType === 'CONTRACTOR'
+    if (!isContractor) {
+      annualLeaveLoading = annualLeavePayout * 0.175
+    }
+  }
+
+  const totalAnnualLeaveGross = annualLeavePayout + annualLeaveLoading
+  const totalGross = totalAnnualLeaveGross  // LSL excluded — requires manual calc by state
+
+  return {
+    employeeId: employee.id,
+    employeeName: `${employee.firstName} ${employee.lastName}`,
+    employmentType: employee.employmentType,
+    endDate,
+    payType: payRate?.payType ?? null,
+    hourlyRate,
+    payTypeNote,
+    isCasual,
+    annualLeave: {
+      balanceHours: annualHours,
+      ordinaryPay: annualLeavePayout,
+      loading: annualLeaveLoading,
+      total: totalAnnualLeaveGross,
+      note: isCasual
+        ? 'Casuals receive casual loading in lieu of annual leave — no leave payout applies.'
+        : hourlyRate === null
+        ? 'Cannot calculate automatically — rate type requires manual hourly equivalent.'
+        : null,
+    },
+    longServiceLeave: {
+      balanceHours: lslHours,
+      note: 'LSL payout amount depends on state law and years of service. Calculate separately using your state LSL Act before processing the final pay run.',
+    },
+    totalGross,
+    taxNote: 'Tax on termination payments depends on the reason for termination. Seek advice if this is a genuine redundancy or ETP.',
+  }
+}
+
 // ─── Pay rates ──────────────────────────────────────────────────────────────
 
 export async function addPayRate(

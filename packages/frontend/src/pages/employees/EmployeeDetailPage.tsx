@@ -136,6 +136,17 @@ export function EmployeeDetailPage() {
   const [terminateEndDate, setTerminateEndDate] = useState('')
   const [terminateReason, setTerminateReason] = useState('')
   const [terminateError, setTerminateError] = useState('')
+  const [terminateStep, setTerminateStep] = useState<'form' | 'preview'>('form')
+  const [terminationPay, setTerminationPay] = useState<null | {
+    annualLeave: { balanceHours: number; ordinaryPay: number; loading: number; total: number; note: string | null }
+    longServiceLeave: { balanceHours: number; note: string }
+    totalGross: number
+    hourlyRate: number | null
+    payTypeNote: string
+    isCasual: boolean
+    taxNote: string
+  }>(null)
+  const [calculatingPay, setCalculatingPay] = useState(false)
 
   // ── Bank account form state ──
   const [showAddBank, setShowAddBank] = useState(false)
@@ -199,6 +210,8 @@ export function EmployeeDetailPage() {
       setTerminateEndDate('')
       setTerminateReason('')
       setTerminateError('')
+      setTerminateStep('form')
+      setTerminationPay(null)
       toast({ title: 'Employee terminated', description: `${emp?.firstName} ${emp?.lastName} has been marked as inactive.` })
     },
     onError: err => setTerminateError(apiError(err)),
@@ -958,54 +971,133 @@ export function EmployeeDetailPage() {
       {/* ── Terminate modal ── */}
       {showTerminateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md rounded-lg bg-background p-6 shadow-xl">
+          <div className="w-full max-w-lg rounded-lg bg-background p-6 shadow-xl">
             <h2 className="text-lg font-semibold">Terminate {emp.firstName} {emp.lastName}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               This marks the employee as inactive and records their end date. It does not delete any records.
             </p>
 
-            <div className="mt-4 space-y-3">
-              <div className="space-y-1.5">
-                <Label>Last day of employment *</Label>
-                <Input
-                  type="date"
-                  value={terminateEndDate}
-                  onChange={e => setTerminateEndDate(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Reason (optional)</Label>
-                <Input
-                  placeholder="e.g. Resignation, Redundancy, End of contract…"
-                  value={terminateReason}
-                  onChange={e => setTerminateReason(e.target.value)}
-                />
-              </div>
-              {terminateError && (
-                <p className="text-sm text-destructive">{terminateError}</p>
-              )}
-            </div>
+            {terminateStep === 'form' && (
+              <>
+                <div className="mt-4 space-y-3">
+                  <div className="space-y-1.5">
+                    <Label>Last day of employment *</Label>
+                    <Input
+                      type="date"
+                      value={terminateEndDate}
+                      onChange={e => setTerminateEndDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Reason (optional)</Label>
+                    <Input
+                      placeholder="e.g. Resignation, Redundancy, End of contract…"
+                      value={terminateReason}
+                      onChange={e => setTerminateReason(e.target.value)}
+                    />
+                  </div>
+                  {terminateError && <p className="text-sm text-destructive">{terminateError}</p>}
+                </div>
+                <div className="mt-5 flex justify-end gap-3">
+                  <Button variant="outline" onClick={() => {
+                    setShowTerminateModal(false)
+                    setTerminateError('')
+                    setTerminateEndDate('')
+                    setTerminateReason('')
+                    setTerminateStep('form')
+                    setTerminationPay(null)
+                  }}>Cancel</Button>
+                  <Button
+                    disabled={!terminateEndDate || calculatingPay}
+                    onClick={async () => {
+                      setCalculatingPay(true)
+                      setTerminateError('')
+                      try {
+                        const { data } = await api.get(
+                          `/employees/${id}/termination-pay?companyId=${activeCompanyId}&endDate=${terminateEndDate}`
+                        )
+                        setTerminationPay(data.data)
+                        setTerminateStep('preview')
+                      } catch (err) {
+                        setTerminateError(apiError(err))
+                      } finally {
+                        setCalculatingPay(false)
+                      }
+                    }}
+                  >
+                    {calculatingPay ? 'Calculating…' : 'Calculate final pay →'}
+                  </Button>
+                </div>
+              </>
+            )}
 
-            <div className="mt-5 flex justify-end gap-3">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowTerminateModal(false)
-                  setTerminateError('')
-                  setTerminateEndDate('')
-                  setTerminateReason('')
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                disabled={!terminateEndDate || terminateMutation.isPending}
-                onClick={() => terminateMutation.mutate()}
-              >
-                {terminateMutation.isPending ? 'Saving…' : 'Terminate employee'}
-              </Button>
-            </div>
+            {terminateStep === 'preview' && terminationPay && (
+              <>
+                <div className="mt-4 space-y-3">
+                  {/* Annual leave */}
+                  <div className="rounded-md border p-4 space-y-2">
+                    <p className="text-sm font-semibold">Annual leave payout</p>
+                    {terminationPay.annualLeave.note ? (
+                      <p className="text-sm text-muted-foreground">{terminationPay.annualLeave.note}</p>
+                    ) : (
+                      <div className="text-sm space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Balance</span>
+                          <span>{terminationPay.annualLeave.balanceHours.toFixed(2)} hrs</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Ordinary pay</span>
+                          <span>${terminationPay.annualLeave.ordinaryPay.toFixed(2)}</span>
+                        </div>
+                        {terminationPay.annualLeave.loading > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">17.5% loading</span>
+                            <span>${terminationPay.annualLeave.loading.toFixed(2)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between font-semibold border-t pt-1 mt-1">
+                          <span>Subtotal</span>
+                          <span>${terminationPay.annualLeave.total.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    )}
+                    {terminationPay.payTypeNote && (
+                      <p className="text-xs text-muted-foreground">{terminationPay.payTypeNote}</p>
+                    )}
+                  </div>
+
+                  {/* LSL */}
+                  <div className="rounded-md border p-4 space-y-1">
+                    <p className="text-sm font-semibold">Long service leave</p>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Balance</span>
+                      <span>{terminationPay.longServiceLeave.balanceHours.toFixed(2)} hrs</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{terminationPay.longServiceLeave.note}</p>
+                  </div>
+
+                  {/* Total */}
+                  <div className="rounded-md bg-muted p-4 flex justify-between items-center">
+                    <span className="font-semibold">Estimated gross payout</span>
+                    <span className="text-lg font-bold">${terminationPay.totalGross.toFixed(2)}</span>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">{terminationPay.taxNote}</p>
+                  {terminateError && <p className="text-sm text-destructive">{terminateError}</p>}
+                </div>
+
+                <div className="mt-5 flex justify-end gap-3">
+                  <Button variant="outline" onClick={() => setTerminateStep('form')}>← Back</Button>
+                  <Button
+                    variant="destructive"
+                    disabled={terminateMutation.isPending}
+                    onClick={() => terminateMutation.mutate()}
+                  >
+                    {terminateMutation.isPending ? 'Saving…' : 'Confirm termination'}
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

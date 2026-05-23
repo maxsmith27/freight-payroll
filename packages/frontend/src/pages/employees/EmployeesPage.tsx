@@ -1,15 +1,16 @@
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useState, useRef } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Plus, Search, Filter } from 'lucide-react'
+import { Plus, Search, Filter, Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { useAuthStore } from '@/store/auth.store'
-import { api } from '@/lib/api'
+import { api, apiError } from '@/lib/api'
 import { formatCurrency, employmentTypeLabel, getInitials } from '@/lib/utils'
+import { useToast } from '@/hooks/useToast'
 
 // ── Helper: pick the right rate field and suffix for the list view ───────────
 function formatListPayRate(r: {
@@ -57,11 +58,150 @@ interface Employee {
 const EMPLOYMENT_TYPES = ['', 'FULL_TIME', 'PART_TIME', 'CASUAL', 'CONTRACTOR']
 const AWARD_CODES = ['', 'MA000038', 'MA000039']
 
+// ── CSV header → field mapping ───────────────────────────────────────────────
+// Accepts common variations of header names (case-insensitive, no spaces/underscores)
+const FIELD_MAP: Record<string, string> = {
+  employeenumber: 'employeeNumber', empno: 'employeeNumber', number: 'employeeNumber',
+  firstname: 'firstName', first: 'firstName',
+  lastname: 'lastName', last: 'lastName', surname: 'lastName',
+  email: 'email',
+  mobile: 'mobile', phone: 'mobile',
+  employmenttype: 'employmentType', type: 'employmentType',
+  startdate: 'startDate', start: 'startDate',
+  payfrequency: 'payFrequency', frequency: 'payFrequency', freq: 'payFrequency',
+  hourlyrate: 'hourlyRate', rate: 'hourlyRate',
+  awardcode: 'awardCode', award: 'awardCode',
+  classificationlevel: 'classificationLevel', grade: 'classificationLevel', classification: 'classificationLevel',
+  depotcode: 'depotCode', depot: 'depotCode',
+}
+
+const REQUIRED = ['employeeNumber', 'firstName', 'lastName', 'employmentType', 'startDate', 'payFrequency']
+const VALID_EMP_TYPES = new Set(['FULL_TIME', 'PART_TIME', 'CASUAL', 'CONTRACTOR'])
+const VALID_FREQ = new Set(['WEEKLY', 'FORTNIGHTLY', 'MONTHLY'])
+
+interface ParsedRow {
+  rowIndex: number
+  raw: Record<string, string>
+  mapped: Record<string, string>
+  errors: string[]
+  valid: boolean
+}
+
+function parseCSV(text: string): { headers: string[]; rows: string[][] } {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim())
+  const parse = (line: string): string[] => {
+    const result: string[] = []
+    let cur = '', inQ = false
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i]
+      if (c === '"') { inQ = !inQ } else if (c === ',' && !inQ) { result.push(cur.trim()); cur = '' } else { cur += c }
+    }
+    result.push(cur.trim())
+    return result
+  }
+  const [headerLine, ...dataLines] = lines
+  return { headers: parse(headerLine), rows: dataLines.map(parse) }
+}
+
+function validateRows(headers: string[], rows: string[][]): ParsedRow[] {
+  const mappedHeaders = headers.map(h => FIELD_MAP[h.toLowerCase().replace(/[\s_-]/g, '')] ?? h)
+
+  return rows.map((cols, i) => {
+    const raw: Record<string, string> = {}
+    const mapped: Record<string, string> = {}
+    headers.forEach((h, j) => {
+      raw[h] = cols[j] ?? ''
+      const field = mappedHeaders[j]
+      if (field) mapped[field] = cols[j]?.trim() ?? ''
+    })
+
+    const errors: string[] = []
+    for (const req of REQUIRED) {
+      if (!mapped[req]) errors.push(`Missing: ${req}`)
+    }
+    if (mapped.employmentType && !VALID_EMP_TYPES.has(mapped.employmentType.toUpperCase())) {
+      errors.push(`Invalid employmentType "${mapped.employmentType}" — use FULL_TIME, PART_TIME, CASUAL, or CONTRACTOR`)
+      mapped.employmentType = mapped.employmentType.toUpperCase()
+    } else if (mapped.employmentType) {
+      mapped.employmentType = mapped.employmentType.toUpperCase()
+    }
+    if (mapped.payFrequency && !VALID_FREQ.has(mapped.payFrequency.toUpperCase())) {
+      errors.push(`Invalid payFrequency "${mapped.payFrequency}" — use WEEKLY, FORTNIGHTLY, or MONTHLY`)
+      mapped.payFrequency = mapped.payFrequency.toUpperCase()
+    } else if (mapped.payFrequency) {
+      mapped.payFrequency = mapped.payFrequency.toUpperCase()
+    }
+    if (mapped.startDate && isNaN(Date.parse(mapped.startDate))) {
+      errors.push(`Invalid startDate "${mapped.startDate}" — use YYYY-MM-DD`)
+    }
+    if (mapped.hourlyRate && isNaN(Number(mapped.hourlyRate))) {
+      errors.push(`Invalid hourlyRate "${mapped.hourlyRate}" — must be a number`)
+    }
+
+    return { rowIndex: i + 2, raw, mapped, errors, valid: errors.length === 0 }
+  })
+}
+
 export function EmployeesPage() {
   const { activeCompanyId } = useAuthStore()
+  const { toast } = useToast()
+  const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [employmentType, setEmploymentType] = useState('')
   const [awardCode, setAwardCode] = useState('')
+
+  // ── Import state ──────────────────────────────────────────────────────────
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [importStep, setImportStep] = useState<'idle' | 'preview' | 'done'>('idle')
+  const [parsedRows, setParsedRows] = useState<ParsedRow[]>([])
+  const [importResult, setImportResult] = useState<{ created: number; errors: Array<{ row: number; error: string }> } | null>(null)
+
+  const importMutation = useMutation({
+    mutationFn: (rows: ParsedRow[]) => {
+      const payload = rows.filter(r => r.valid).map(r => ({
+        employeeNumber: r.mapped.employeeNumber,
+        firstName: r.mapped.firstName,
+        lastName: r.mapped.lastName,
+        email: r.mapped.email || undefined,
+        mobile: r.mapped.mobile || undefined,
+        employmentType: r.mapped.employmentType,
+        startDate: r.mapped.startDate,
+        payFrequency: r.mapped.payFrequency,
+        hourlyRate: r.mapped.hourlyRate ? Number(r.mapped.hourlyRate) : undefined,
+        awardCode: r.mapped.awardCode || undefined,
+        classificationLevel: r.mapped.classificationLevel || undefined,
+        depotCode: r.mapped.depotCode || undefined,
+      }))
+      return api.post(`/employees/import?companyId=${activeCompanyId}`, { rows: payload })
+    },
+    onSuccess: (res) => {
+      setImportResult(res.data.data)
+      setImportStep('done')
+      queryClient.invalidateQueries({ queryKey: ['employees'] })
+    },
+    onError: err => toast({ title: 'Import failed', description: apiError(err), variant: 'destructive' }),
+  })
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string
+      const { headers, rows } = parseCSV(text)
+      const validated = validateRows(headers, rows)
+      setParsedRows(validated)
+      setImportStep('preview')
+    }
+    reader.readAsText(file)
+    e.target.value = ''  // allow re-selecting same file
+  }
+
+  function resetImport() {
+    setParsedRows([])
+    setImportResult(null)
+    setImportStep('idle')
+  }
 
   const { data, isLoading } = useQuery({
     queryKey: ['employees', activeCompanyId, search, employmentType, awardCode],
@@ -77,6 +217,123 @@ export function EmployeesPage() {
   })
 
   const employees = data?.data ?? []
+  const validCount = parsedRows.filter(r => r.valid).length
+  const invalidCount = parsedRows.filter(r => !r.valid).length
+
+  // ── Import preview modal ──────────────────────────────────────────────────
+  if (importStep !== 'idle') {
+    return (
+      <div className="flex flex-col gap-0">
+        <PageHeader
+          title={importStep === 'done' ? 'Import complete' : 'Review import'}
+          description={
+            importStep === 'done'
+              ? `${importResult?.created ?? 0} employee${importResult?.created !== 1 ? 's' : ''} created`
+              : `${parsedRows.length} rows · ${validCount} valid · ${invalidCount} with errors`
+          }
+          actions={
+            importStep === 'preview' ? (
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={resetImport}>
+                  <X className="h-4 w-4 mr-1" /> Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={validCount === 0 || importMutation.isPending}
+                  onClick={() => importMutation.mutate(parsedRows)}
+                >
+                  {importMutation.isPending
+                    ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Importing…</>
+                    : `Import ${validCount} valid row${validCount !== 1 ? 's' : ''}`}
+                </Button>
+              </div>
+            ) : (
+              <Button size="sm" onClick={resetImport}>Done</Button>
+            )
+          }
+        />
+
+        <div className="p-6 space-y-4">
+          {/* Download template link */}
+          {importStep === 'preview' && (
+            <p className="text-sm text-muted-foreground">
+              Required columns: <code className="text-xs bg-muted px-1 rounded">employeeNumber, firstName, lastName, employmentType, startDate, payFrequency</code>
+              {' '}— Optional: email, mobile, hourlyRate, awardCode, classificationLevel, depotCode
+            </p>
+          )}
+
+          {/* Done summary */}
+          {importStep === 'done' && importResult && (
+            <Card>
+              <CardContent className="p-4 space-y-2">
+                <div className="flex items-center gap-2 text-green-700">
+                  <CheckCircle className="h-5 w-5" />
+                  <span className="font-semibold">{importResult.created} employee{importResult.created !== 1 ? 's' : ''} created successfully</span>
+                </div>
+                {importResult.errors.length > 0 && (
+                  <div className="space-y-1 mt-2">
+                    <p className="text-sm font-medium text-destructive">Rows that failed ({importResult.errors.length}):</p>
+                    {importResult.errors.map(e => (
+                      <p key={e.row} className="text-xs text-destructive">Row {e.row}: {e.error}</p>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Preview table */}
+          {importStep === 'preview' && (
+            <Card>
+              <CardContent className="p-0 overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b bg-muted/40">
+                      <th className="px-3 py-2 text-left text-muted-foreground w-10">#</th>
+                      <th className="px-3 py-2 text-left text-muted-foreground">Status</th>
+                      <th className="px-3 py-2 text-left text-muted-foreground">Emp #</th>
+                      <th className="px-3 py-2 text-left text-muted-foreground">First name</th>
+                      <th className="px-3 py-2 text-left text-muted-foreground">Last name</th>
+                      <th className="px-3 py-2 text-left text-muted-foreground">Type</th>
+                      <th className="px-3 py-2 text-left text-muted-foreground">Start date</th>
+                      <th className="px-3 py-2 text-left text-muted-foreground">Frequency</th>
+                      <th className="px-3 py-2 text-left text-muted-foreground">Rate</th>
+                      <th className="px-3 py-2 text-left text-muted-foreground">Award</th>
+                      <th className="px-3 py-2 text-left text-muted-foreground">Errors</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parsedRows.map(row => (
+                      <tr
+                        key={row.rowIndex}
+                        className={`border-b last:border-0 ${row.valid ? '' : 'bg-red-50'}`}
+                      >
+                        <td className="px-3 py-2 text-muted-foreground">{row.rowIndex}</td>
+                        <td className="px-3 py-2">
+                          {row.valid
+                            ? <CheckCircle className="h-4 w-4 text-green-600" />
+                            : <AlertCircle className="h-4 w-4 text-destructive" />}
+                        </td>
+                        <td className="px-3 py-2 font-mono">{row.mapped.employeeNumber ?? '—'}</td>
+                        <td className="px-3 py-2">{row.mapped.firstName ?? '—'}</td>
+                        <td className="px-3 py-2">{row.mapped.lastName ?? '—'}</td>
+                        <td className="px-3 py-2">{row.mapped.employmentType ?? '—'}</td>
+                        <td className="px-3 py-2">{row.mapped.startDate ?? '—'}</td>
+                        <td className="px-3 py-2">{row.mapped.payFrequency ?? '—'}</td>
+                        <td className="px-3 py-2">{row.mapped.hourlyRate ? `$${row.mapped.hourlyRate}/hr` : '—'}</td>
+                        <td className="px-3 py-2">{row.mapped.awardCode ?? '—'}</td>
+                        <td className="px-3 py-2 text-destructive">{row.errors.join('; ')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-0">
@@ -84,12 +341,24 @@ export function EmployeesPage() {
         title="Employees"
         description={data ? `${data.total} employees` : ''}
         actions={
-          <Button asChild size="sm">
-            <Link to="/employees/new">
-              <Plus className="h-4 w-4" />
-              Add employee
-            </Link>
-          </Button>
+          <div className="flex gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+              <Upload className="h-4 w-4 mr-1" /> Import CSV
+            </Button>
+            <Button asChild size="sm">
+              <Link to="/employees/new">
+                <Plus className="h-4 w-4" />
+                Add employee
+              </Link>
+            </Button>
+          </div>
         }
       />
 

@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import prisma from '../../lib/prisma.js'
 import { NotFoundError } from '../../middleware/error.middleware.js'
+import { sendEmail, complianceAlertEmail, type ComplianceAlertItem } from '../../lib/email.js'
+import { logger } from '../../lib/logger.js'
 
 export const licenceSchema = z.object({
   licenceNumber: z.string().min(1),
@@ -177,6 +179,107 @@ export async function getExpiryAlerts(
     licences: addAlertLevel(licences),
     accreditations: addAlertLevel(accreditations),
     medicals: addAlertLevel(medicals),
+  }
+}
+
+// ─── Compliance expiry email alerts ─────────────────────────────────────────
+// Sends one digest email to all COMPANY_ADMIN users for the company listing
+// every licence, accreditation, and medical cert expiring within 90 days.
+// Called daily by the scheduler in index.ts; can also be triggered manually.
+
+export async function sendExpiryAlertEmails(companyId: string): Promise<{ sent: number; skipped: string }> {
+  // Load company + admin emails
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: {
+      name: true,
+      userAccess: {
+        where: { role: 'COMPANY_ADMIN' },
+        select: { user: { select: { email: true, isActive: true } } },
+      },
+    },
+  })
+  if (!company) return { sent: 0, skipped: 'Company not found' }
+
+  const adminEmails = company.userAccess
+    .filter(ua => ua.user.isActive && ua.user.email)
+    .map(ua => ua.user.email as string)
+
+  if (adminEmails.length === 0) return { sent: 0, skipped: 'No active admin emails' }
+
+  // Get expiry data
+  const alerts = await getExpiryAlerts(companyId, 90)
+
+  // Normalise all three document types into a flat list with a label
+  const normalise = (
+    items: Array<{ employee: { firstName: string; lastName: string; employeeNumber: string }; expiryDate: Date | null; daysUntilExpiry: number | null; alertLevel: string }>,
+    makeLabel: (item: typeof items[number]) => string,
+  ): ComplianceAlertItem[] =>
+    items.map(item => ({
+      employeeName: `${item.employee.firstName} ${item.employee.lastName}`,
+      employeeNumber: item.employee.employeeNumber,
+      documentType: makeLabel(item),
+      expiryDate: item.expiryDate,
+      daysUntilExpiry: item.daysUntilExpiry,
+    }))
+
+  const licenceItems = normalise(
+    alerts.licences as any,
+    (l: any) => `Licence (${(l.licenceClasses as string[]).join('/')})`,
+  )
+  const accredItems = normalise(
+    alerts.accreditations as any,
+    (a: any) => (a.accreditationType as string).replace(/_/g, ' '),
+  )
+  const medicalItems = normalise(
+    alerts.medicals as any,
+    (m: any) => (m.certType as string).replace(/_/g, ' '),
+  )
+
+  const all = [...licenceItems, ...accredItems, ...medicalItems]
+  if (all.length === 0) return { sent: 0, skipped: 'No expiring items' }
+
+  const bucket = (level: string) => all.filter(item => {
+    const days = item.daysUntilExpiry
+    if (level === 'expired')  return days !== null && days < 0
+    if (level === 'critical') return days !== null && days >= 0 && days <= 30
+    if (level === 'warning')  return days !== null && days > 30 && days <= 60
+    if (level === 'notice')   return days !== null && days > 60
+    return false
+  })
+
+  const emailTemplate = complianceAlertEmail({
+    companyName: company.name,
+    expired:  bucket('expired'),
+    critical: bucket('critical'),
+    warning:  bucket('warning'),
+    notice:   bucket('notice'),
+  })
+
+  let sent = 0
+  for (const email of adminEmails) {
+    await sendEmail({ ...emailTemplate, to: email })
+    sent++
+  }
+
+  return { sent, skipped: '' }
+}
+
+export async function sendAllComplianceAlerts(): Promise<void> {
+  const companies = await prisma.company.findMany({
+    where: { deletedAt: null },
+    select: { id: true, name: true },
+  })
+
+  for (const company of companies) {
+    try {
+      const result = await sendExpiryAlertEmails(company.id)
+      if (result.sent > 0) {
+        logger.info(`Compliance alerts sent for ${company.name}: ${result.sent} email(s)`)
+      }
+    } catch (err) {
+      logger.error(`Failed to send compliance alerts for company ${company.id}`, { error: err })
+    }
   }
 }
 

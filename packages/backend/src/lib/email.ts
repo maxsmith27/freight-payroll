@@ -71,6 +71,98 @@ async function sendViaSendGrid(from: string, msg: EmailMessage): Promise<void> {
 
 // ─── Email templates ─────────────────────────────────────────────────────────
 
+export interface ComplianceAlertItem {
+  employeeName: string
+  employeeNumber: string
+  documentType: string
+  expiryDate: Date | null
+  daysUntilExpiry: number | null
+}
+
+export function complianceAlertEmail(opts: {
+  companyName: string
+  expired: ComplianceAlertItem[]
+  critical: ComplianceAlertItem[]  // ≤ 30 days
+  warning: ComplianceAlertItem[]   // ≤ 60 days
+  notice: ComplianceAlertItem[]    // ≤ 90 days
+}): EmailMessage {
+  const { companyName, expired, critical, warning, notice } = opts
+  const total = expired.length + critical.length + warning.length + notice.length
+  const urgentCount = expired.length + critical.length
+
+  const fmtDate = (d: Date | null) =>
+    d ? d.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+
+  const rowHtml = (items: ComplianceAlertItem[], colour: string, label: string) =>
+    items.map(item => `
+      <tr style="border-bottom: 1px solid #f0f0f0;">
+        <td style="padding: 8px 12px; font-weight: 500;">${item.employeeName}</td>
+        <td style="padding: 8px 12px; color: #666;">${item.employeeNumber}</td>
+        <td style="padding: 8px 12px;">${item.documentType}</td>
+        <td style="padding: 8px 12px; text-align: center;">
+          <span style="background: ${colour}20; color: ${colour}; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">${label}</span>
+        </td>
+        <td style="padding: 8px 12px; text-align: right; color: #555;">${fmtDate(item.expiryDate)}</td>
+        <td style="padding: 8px 12px; text-align: right; font-weight: 600; color: ${colour};">
+          ${item.daysUntilExpiry != null && item.daysUntilExpiry < 0 ? `${Math.abs(item.daysUntilExpiry)}d overdue` : item.daysUntilExpiry != null ? `${item.daysUntilExpiry}d` : '—'}
+        </td>
+      </tr>`).join('')
+
+  const tableHtml = `
+    <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 16px;">
+      <thead>
+        <tr style="background: #f8f9fa; text-align: left;">
+          <th style="padding: 8px 12px; color: #666; font-weight: 600;">Employee</th>
+          <th style="padding: 8px 12px; color: #666; font-weight: 600;">Number</th>
+          <th style="padding: 8px 12px; color: #666; font-weight: 600;">Document</th>
+          <th style="padding: 8px 12px; color: #666; font-weight: 600; text-align: center;">Status</th>
+          <th style="padding: 8px 12px; color: #666; font-weight: 600; text-align: right;">Expiry date</th>
+          <th style="padding: 8px 12px; color: #666; font-weight: 600; text-align: right;">Remaining</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowHtml(expired, '#dc2626', 'EXPIRED')}
+        ${rowHtml(critical, '#ea580c', 'CRITICAL')}
+        ${rowHtml(warning, '#ca8a04', 'WARNING')}
+        ${rowHtml(notice, '#2563eb', 'NOTICE')}
+      </tbody>
+    </table>`
+
+  const plainRows = [...expired, ...critical, ...warning, ...notice].map(item =>
+    `  ${item.employeeName} (${item.employeeNumber}) — ${item.documentType} — expires ${fmtDate(item.expiryDate)}`
+  ).join('\n')
+
+  return {
+    to: '',
+    subject: urgentCount > 0
+      ? `⚠️ ${urgentCount} urgent compliance alert${urgentCount > 1 ? 's' : ''} — ${companyName}`
+      : `Compliance digest — ${total} item${total > 1 ? 's' : ''} expiring soon — ${companyName}`,
+    text: `FreightPayroll Compliance Alert — ${companyName}\n\n${total} document${total > 1 ? 's' : ''} require attention:\n\n${plainRows}\n\nLog in to FreightPayroll to take action.`,
+    html: `<!DOCTYPE html>
+<html>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #111; max-width: 700px; margin: 40px auto; padding: 0 20px;">
+  <div style="border-bottom: 3px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px;">
+    <h1 style="font-size: 18px; font-weight: 700; color: #2563eb; margin: 0;">FreightPayroll</h1>
+  </div>
+  ${urgentCount > 0 ? `<div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 12px 16px; margin-bottom: 20px;">
+    <strong style="color: #dc2626;">⚠️ ${urgentCount} urgent item${urgentCount > 1 ? 's' : ''} require immediate action</strong>
+  </div>` : ''}
+  <h2 style="font-size: 20px; margin-bottom: 4px;">Compliance expiry alert</h2>
+  <p style="color: #555; margin-bottom: 0;">${companyName} — ${total} document${total > 1 ? 's' : ''} expiring within 90 days</p>
+  ${tableHtml}
+  <div style="margin-top: 24px;">
+    <a href="${process.env['FRONTEND_URL'] ?? 'https://app.freightpayroll.com.au'}/compliance"
+       style="display: inline-block; background: #2563eb; color: white; text-decoration: none; padding: 10px 24px; border-radius: 6px; font-weight: 600;">
+      View compliance dashboard
+    </a>
+  </div>
+  <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+  <p style="color: #aaa; font-size: 12px;">FreightPayroll — this alert is sent daily. Update or renew documents in the Compliance module.</p>
+</body>
+</html>`,
+  }
+}
+
 export function onboardingInviteEmail(opts: {
   companyName: string
   inviterName: string
