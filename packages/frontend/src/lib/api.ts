@@ -77,7 +77,17 @@ api.interceptors.response.use(
 
 export function apiError(err: unknown): string {
   if (axios.isAxiosError(err)) {
-    return err.response?.data?.error ?? err.message
+    const data = err.response?.data
+    if (!data) return err.message
+    const message: string = data.error ?? err.message
+    // Append Zod field-level details when present (e.g. "Validation failed — email: Invalid email")
+    if (data.details && typeof data.details === 'object') {
+      const fieldErrors = Object.entries(data.details as Record<string, string[]>)
+        .map(([field, msgs]) => `${field}: ${msgs.join(', ')}`)
+        .join(' | ')
+      return `${message} — ${fieldErrors}`
+    }
+    return message
   }
   return String(err)
 }

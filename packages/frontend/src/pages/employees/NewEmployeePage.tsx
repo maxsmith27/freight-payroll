@@ -34,7 +34,11 @@ const newEmployeeSchema = z.object({
   payType: z.enum(['HOURLY', 'SALARY', 'PER_KM', 'PER_LOAD', 'PERCENTAGE_REVENUE']),
   baseRate: z.coerce.number().min(0, 'Must be ≥ 0'),
   // Tax — exact backend field names
-  taxFileNumber: z.string().optional(),
+  taxFileNumber: z
+    .string()
+    .regex(/^\d{9}$/, 'TFN must be exactly 9 digits (no spaces or dashes)')
+    .optional()
+    .or(z.literal('')),
   taxResidencyStatus: z.enum(['RESIDENT', 'FOREIGN_RESIDENT', 'WORKING_HOLIDAY_MAKER']),
   claimsTaxFreeThreshold: z.boolean(),
   hasHECSDebt: z.boolean(),
@@ -373,7 +377,10 @@ export function NewEmployeePage() {
               </div>
               <div className="space-y-1.5">
                 <Label>TFN (stored encrypted)</Label>
-                <Input {...register('taxFileNumber')} placeholder="Enter TFN" />
+                <Input {...register('taxFileNumber')} placeholder="e.g. 123456789" maxLength={9} />
+                {errors.taxFileNumber && (
+                  <p className="text-xs text-destructive">{errors.taxFileNumber.message}</p>
+                )}
               </div>
               <div className="col-span-2 flex gap-6">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
