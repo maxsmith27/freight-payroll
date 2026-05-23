@@ -71,7 +71,7 @@ export function EmployeeDetailPage() {
   const { data: emp, isLoading } = useQuery<EmployeeDetail & { portalUser?: { email: string; isActive: boolean } | null }>({
     queryKey: ['employee', id],
     queryFn: async () => {
-      const { data } = await api.get(`/employees/${id}`)
+      const { data } = await api.get(`/employees/${id}?companyId=${activeCompanyId}`)
       return data.data
     },
   })

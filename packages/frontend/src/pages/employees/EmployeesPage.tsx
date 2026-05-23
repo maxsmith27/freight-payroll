@@ -38,17 +38,17 @@ export function EmployeesPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['employees', activeCompanyId, search, employmentType, awardCode],
     queryFn: async () => {
-      const params = new URLSearchParams({ page: '1', limit: '50' })
+      const params = new URLSearchParams({ companyId: activeCompanyId!, page: '1', pageSize: '50' })
       if (search) params.set('search', search)
       if (employmentType) params.set('employmentType', employmentType)
       if (awardCode) params.set('awardCode', awardCode)
-      const { data } = await api.get(`/companies/${activeCompanyId}/employees?${params}`)
-      return data.data as { items: Employee[]; total: number; page: number; limit: number }
+      const { data } = await api.get(`/employees?${params}`)
+      return data as { data: Employee[]; total: number; page: number; pageSize: number }
     },
     enabled: !!activeCompanyId,
   })
 
-  const employees = data?.items ?? []
+  const employees = data?.data ?? []
 
   return (
     <div className="flex flex-col gap-0">

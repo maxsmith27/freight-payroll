@@ -76,7 +76,7 @@ const router = createBrowserRouter([
       // Available to all non-employee roles
       { path: 'dashboard',        element: <DashboardPage /> },
       { path: 'employees',        element: <EmployeesPage /> },
-      { path: 'employees/new',    element: <EmployeesPage /> },
+      { path: 'employees/new',    element: <NewEmployeePage /> },
       { path: 'employees/:id',    element: <EmployeeDetailPage /> },
       { path: 'time-attendance',  element: <TimesheetsPage /> },
       { path: 'km-log-approvals', element: <KmLogApprovalsPage /> },
