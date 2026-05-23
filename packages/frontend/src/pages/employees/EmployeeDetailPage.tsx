@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Edit, AlertTriangle, UserCheck, UserX, Copy } from 'lucide-react'
+import { ArrowLeft, Edit, AlertTriangle, UserCheck, UserX, Copy, Send, RotateCcw, XCircle, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -157,6 +157,7 @@ export function EmployeeDetailPage() {
             <TabsTrigger value="compliance">Compliance</TabsTrigger>
             <TabsTrigger value="bank">Banking</TabsTrigger>
             <TabsTrigger value="portal">Portal Access</TabsTrigger>
+            <TabsTrigger value="onboarding">Onboarding</TabsTrigger>
           </TabsList>
 
           {/* Details tab */}
@@ -452,6 +453,11 @@ export function EmployeeDetailPage() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {/* ── Onboarding ── */}
+          <TabsContent value="onboarding">
+            <OnboardingPanel employeeId={emp.id} employeeEmail={emp.email} employeeFirstName={emp.firstName} />
+          </TabsContent>
         </Tabs>
       </div>
     </div>
@@ -463,6 +469,248 @@ function Row({ label, value }: { label: string; value: string | null | undefined
     <div className="flex justify-between gap-4">
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium text-right">{value ?? '—'}</span>
+    </div>
+  )
+}
+
+// ─── Onboarding panel ─────────────────────────────────────────────────────────
+
+interface OnboardingRecord {
+  id: string
+  inviteEmail: string
+  status: string
+  expiresAt: string
+  createdAt: string
+  hasSubmitted: boolean
+  data: Record<string, unknown> | null
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  INVITED: 'Invited',
+  IN_PROGRESS: 'In Progress',
+  PENDING_REVIEW: 'Ready to Review',
+  COMPLETED: 'Completed',
+  EXPIRED: 'Expired',
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  INVITED: 'bg-yellow-100 text-yellow-800',
+  IN_PROGRESS: 'bg-blue-100 text-blue-800',
+  PENDING_REVIEW: 'bg-purple-100 text-purple-800',
+  COMPLETED: 'bg-green-100 text-green-800',
+  EXPIRED: 'bg-slate-100 text-slate-600',
+}
+
+function OnboardingPanel({
+  employeeId,
+  employeeEmail,
+  employeeFirstName,
+}: {
+  employeeId: string
+  employeeEmail: string | null
+  employeeFirstName: string
+}) {
+  const queryClient = useQueryClient()
+  const { activeCompanyId } = useAuthStore()
+  const { toast } = useToast()
+  const [inviteEmail, setInviteEmail] = useState(employeeEmail ?? '')
+  const [inviteMessage, setInviteMessage] = useState('')
+  const [formError, setFormError] = useState('')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+
+  const { data: onboardings, isLoading } = useQuery<OnboardingRecord[]>({
+    queryKey: ['onboarding', 'pending', activeCompanyId],
+    queryFn: () =>
+      api.get(`/onboarding/pending?companyId=${activeCompanyId}`).then(r => r.data.data),
+    // Filter to ones for this employee email
+  })
+
+  const relevantOnboardings = (onboardings ?? []).filter(o =>
+    o.inviteEmail === (employeeEmail ?? '').toLowerCase()
+  )
+
+  const sendInviteMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/onboarding/invite?companyId=${activeCompanyId}`, {
+        firstName: employeeFirstName,
+        lastName: '',
+        email: inviteEmail,
+        message: inviteMessage || undefined,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['onboarding', 'pending', activeCompanyId] })
+      toast({ title: 'Invite sent', description: `Onboarding invite sent to ${inviteEmail}` })
+      setFormError('')
+    },
+    onError: err => setFormError(apiError(err)),
+  })
+
+  const resendMutation = useMutation({
+    mutationFn: (id: string) =>
+      api.post(`/onboarding/${id}/resend?companyId=${activeCompanyId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['onboarding', 'pending', activeCompanyId] })
+      toast({ title: 'Invite resent' })
+    },
+    onError: err => toast({ title: 'Error', description: apiError(err), variant: 'destructive' }),
+  })
+
+  const activateMutation = useMutation({
+    mutationFn: (id: string) =>
+      api.post(`/onboarding/${id}/activate?companyId=${activeCompanyId}`),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['onboarding', 'pending', activeCompanyId] })
+      queryClient.invalidateQueries({ queryKey: ['employee', employeeId] })
+      toast({ title: 'Employee activated', description: `Employee ${res.data.data.employeeNumber} is now active` })
+    },
+    onError: err => toast({ title: 'Error', description: apiError(err), variant: 'destructive' }),
+  })
+
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) =>
+      api.delete(`/onboarding/${id}?companyId=${activeCompanyId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['onboarding', 'pending', activeCompanyId] })
+      toast({ title: 'Invite cancelled' })
+    },
+    onError: err => toast({ title: 'Error', description: apiError(err), variant: 'destructive' }),
+  })
+
+  const hasActiveInvite = relevantOnboardings.some(o =>
+    ['INVITED', 'IN_PROGRESS', 'PENDING_REVIEW'].includes(o.status)
+  )
+
+  return (
+    <div className="space-y-6 max-w-xl">
+      <Card className="border-0 shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-base">Onboarding Workflow</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Send {employeeFirstName} an invite link so they can complete their own details: TFN declaration, super choice, bank account, and personal information.
+          </p>
+
+          {/* Active / past invites */}
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : relevantOnboardings.length > 0 ? (
+            <div className="space-y-3">
+              {relevantOnboardings.map(record => (
+                <div key={record.id} className="rounded-lg border border-slate-200 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[record.status] ?? ''}`}>
+                          {STATUS_LABELS[record.status] ?? record.status}
+                        </span>
+                        <span className="text-xs text-muted-foreground">{record.inviteEmail}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        Sent {new Date(record.createdAt).toLocaleDateString('en-AU')} · Expires {new Date(record.expiresAt).toLocaleDateString('en-AU')}
+                      </p>
+                    </div>
+                    <div className="flex gap-1.5">
+                      {record.status === 'PENDING_REVIEW' && (
+                        <Button
+                          size="sm"
+                          onClick={() => activateMutation.mutate(record.id)}
+                          disabled={activateMutation.isPending}
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                        >
+                          <UserCheck className="h-4 w-4 mr-1" /> Activate
+                        </Button>
+                      )}
+                      {['INVITED', 'IN_PROGRESS', 'EXPIRED'].includes(record.status) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => resendMutation.mutate(record.id)}
+                          disabled={resendMutation.isPending}
+                        >
+                          <RotateCcw className="h-4 w-4 mr-1" /> Resend
+                        </Button>
+                      )}
+                      {['INVITED', 'IN_PROGRESS'].includes(record.status) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={() => cancelMutation.mutate(record.id)}
+                        >
+                          <XCircle className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Show submitted data for pending review */}
+                  {record.status === 'PENDING_REVIEW' && record.data && (
+                    <>
+                      <button
+                        onClick={() => setExpandedId(expandedId === record.id ? null : record.id)}
+                        className="w-full px-4 py-2 text-xs text-blue-600 hover:bg-blue-50 border-t text-left"
+                      >
+                        {expandedId === record.id ? 'Hide submitted details ▲' : 'View submitted details ▼'}
+                      </button>
+                      {expandedId === record.id && (
+                        <div className="px-4 pb-4 pt-2 border-t bg-slate-50 space-y-2 text-xs">
+                          {[
+                            ['Name', `${record.data.firstName ?? ''} ${record.data.lastName ?? ''}`.trim()],
+                            ['DOB', record.data.dateOfBirth as string],
+                            ['Mobile', record.data.mobile as string],
+                            ['Address', [record.data.addressStreet, record.data.addressSuburb, record.data.addressState, record.data.addressPostcode].filter(Boolean).join(', ')],
+                            ['Tax residency', record.data.taxResidencyStatus as string],
+                            ['Claims TFT', record.data.claimsTaxFreeThreshold ? 'Yes' : 'No'],
+                            ['TFN provided', record.data.taxFileNumber ? 'Yes' : 'No'],
+                            ['Super fund', record.data.useDefaultFund ? 'Default' : (record.data.superFundName as string)],
+                            ['Bank BSB', record.data.bankBsb as string],
+                          ].filter(([, v]) => v).map(([label, value]) => (
+                            <div key={label as string} className="flex gap-3">
+                              <span className="text-muted-foreground w-28 shrink-0">{label}</span>
+                              <span className="font-medium">{value as string}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {/* Send invite form */}
+          {!hasActiveInvite && (
+            <div className="space-y-3 pt-2 border-t">
+              <p className="text-sm font-medium">Send onboarding invite</p>
+              <div className="space-y-1.5">
+                <Label>Invite email</Label>
+                <Input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={e => setInviteEmail(e.target.value)}
+                  placeholder="employee@email.com"
+                />
+              </div>
+              {formError && <p className="text-sm text-destructive">{formError}</p>}
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (!inviteEmail) { setFormError('Email address is required'); return }
+                  setFormError('')
+                  sendInviteMutation.mutate()
+                }}
+                disabled={sendInviteMutation.isPending}
+              >
+                <Send className="h-4 w-4 mr-1.5" />
+                {sendInviteMutation.isPending ? 'Sending…' : 'Send invite'}
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

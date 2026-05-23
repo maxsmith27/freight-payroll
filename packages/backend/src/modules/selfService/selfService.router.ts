@@ -178,3 +178,62 @@ selfServiceRouter.get('/leave-requests', async (req: Request, res: Response, nex
     res.json({ success: true, data })
   } catch (err) { next(err) }
 })
+
+selfServiceRouter.post('/leave-requests', validateBody(service.leaveRequestSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const employeeId = await resolveEmployee(req)
+    const data = await service.submitLeaveRequest(employeeId, req.body)
+    res.status(201).json({ success: true, data })
+  } catch (err) { next(err) }
+})
+
+selfServiceRouter.delete('/leave-requests/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const employeeId = await resolveEmployee(req)
+    const data = await service.cancelMyLeaveRequest(req.params.id, employeeId)
+    res.json({ success: true, data })
+  } catch (err) { next(err) }
+})
+
+// ─── Profile update ───────────────────────────────────────────────────────────
+
+selfServiceRouter.put('/profile', validateBody(service.updateProfileSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await service.updateMyProfile(req.user!.id, req.body)
+    res.json({ success: true, data })
+  } catch (err) { next(err) }
+})
+
+// ─── Bank accounts ────────────────────────────────────────────────────────────
+
+selfServiceRouter.get('/bank-accounts', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const employeeId = await resolveEmployee(req)
+    const data = await service.getMyBankAccounts(employeeId)
+    res.json({ success: true, data })
+  } catch (err) { next(err) }
+})
+
+selfServiceRouter.post('/bank-accounts', validateBody(service.bankAccountSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const employeeId = await resolveEmployee(req)
+    const data = await service.addMyBankAccount(employeeId, req.body)
+    res.status(201).json({ success: true, data })
+  } catch (err) { next(err) }
+})
+
+selfServiceRouter.put('/bank-accounts/:id', validateBody(service.bankAccountSchema.partial()), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const employeeId = await resolveEmployee(req)
+    const data = await service.updateMyBankAccount(req.params.id, employeeId, req.body)
+    res.json({ success: true, data })
+  } catch (err) { next(err) }
+})
+
+selfServiceRouter.delete('/bank-accounts/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const employeeId = await resolveEmployee(req)
+    await service.deleteMyBankAccount(req.params.id, employeeId)
+    res.json({ success: true })
+  } catch (err) { next(err) }
+})

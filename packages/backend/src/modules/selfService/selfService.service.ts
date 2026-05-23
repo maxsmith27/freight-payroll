@@ -337,3 +337,225 @@ export async function listMyLeaveRequests(employeeId: string) {
     orderBy: { startDate: 'desc' },
   })
 }
+
+// ─── Leave request submission ─────────────────────────────────────────────────
+
+export const leaveRequestSchema = z.object({
+  leaveType: z.enum([
+    'ANNUAL',
+    'PERSONAL_CARERS',
+    'COMPASSIONATE',
+    'LONG_SERVICE',
+    'PARENTAL',
+    'COMMUNITY_SERVICE',
+    'UNPAID',
+  ]),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  totalHours: z.number().positive(),
+  reason: z.string().max(500).optional(),
+})
+
+export async function submitLeaveRequest(
+  employeeId: string,
+  data: z.infer<typeof leaveRequestSchema>,
+) {
+  const balance = await prisma.leaveBalance.findFirst({
+    where: { employeeId, leaveType: data.leaveType as any },
+  })
+
+  // Warn if insufficient balance (soft check — don't block, manager decides)
+  const available = balance ? Number(balance.accrued) - Number(balance.used) - Number(balance.pending) : 0
+
+  const start = new Date(data.startDate)
+  const end = new Date(data.endDate)
+  const msPerDay = 86400000
+  const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / msPerDay) + 1)
+
+  const request = await prisma.leaveRequest.create({
+    data: {
+      employeeId,
+      leaveType: data.leaveType as any,
+      startDate: start,
+      endDate: end,
+      totalDays,
+      totalHours: data.totalHours,
+      reason: data.reason ?? null,
+      status: 'PENDING',
+    },
+  })
+
+  // Update pending balance
+  if (balance) {
+    await prisma.leaveBalance.update({
+      where: { id: balance.id },
+      data: { pending: { increment: data.totalHours } },
+    })
+  }
+
+  return {
+    ...request,
+    availableHours: available,
+    warning: available < data.totalHours ? `You have ${available.toFixed(1)} hrs available — this request exceeds your balance and requires manager approval.` : null,
+  }
+}
+
+export async function cancelMyLeaveRequest(requestId: string, employeeId: string) {
+  const request = await prisma.leaveRequest.findFirst({
+    where: { id: requestId, employeeId },
+  })
+  if (!request) throw new NotFoundError('Leave request')
+  if (request.status !== 'PENDING') {
+    throw new AppError(400, 'Only pending requests can be cancelled')
+  }
+
+  await prisma.leaveRequest.update({
+    where: { id: requestId },
+    data: { status: 'CANCELLED' },
+  })
+
+  // Reverse pending deduction
+  const balance = await prisma.leaveBalance.findFirst({
+    where: { employeeId, leaveType: request.leaveType },
+  })
+  if (balance) {
+    await prisma.leaveBalance.update({
+      where: { id: balance.id },
+      data: { pending: { decrement: Number(request.totalHours) } },
+    })
+  }
+
+  return { cancelled: true }
+}
+
+// ─── Profile update ───────────────────────────────────────────────────────────
+
+export const updateProfileSchema = z.object({
+  preferredName: z.string().max(50).optional(),
+  phone: z.string().max(20).optional(),
+  mobile: z.string().max(20).optional(),
+  addressStreet: z.string().max(100).optional(),
+  addressSuburb: z.string().max(50).optional(),
+  addressState: z.enum(['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT']).optional(),
+  addressPostcode: z.string().max(4).optional(),
+  emergencyContactName: z.string().optional(),
+  emergencyContactPhone: z.string().optional(),
+  emergencyContactRelationship: z.string().optional(),
+})
+
+export async function updateMyProfile(
+  userId: string,
+  data: z.infer<typeof updateProfileSchema>,
+) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { employeeId: true },
+  })
+  if (!user?.employeeId) throw new NotFoundError('Employee profile')
+
+  const { emergencyContactName, emergencyContactPhone, emergencyContactRelationship, ...empData } = data
+
+  await prisma.employee.update({
+    where: { id: user.employeeId },
+    data: empData,
+  })
+
+  // Update primary emergency contact if provided
+  if (emergencyContactName || emergencyContactPhone) {
+    const existing = await prisma.emergencyContact.findFirst({
+      where: { employeeId: user.employeeId, isPrimary: true },
+    })
+    if (existing) {
+      await prisma.emergencyContact.update({
+        where: { id: existing.id },
+        data: {
+          ...(emergencyContactName ? { name: emergencyContactName } : {}),
+          ...(emergencyContactPhone ? { phone: emergencyContactPhone } : {}),
+          ...(emergencyContactRelationship ? { relationship: emergencyContactRelationship } : {}),
+        },
+      })
+    }
+  }
+
+  return { updated: true }
+}
+
+// ─── Bank accounts ─────────────────────────────────────────────────────────────
+
+import { decrypt, encrypt } from '../../lib/crypto.js'
+
+export async function getMyBankAccounts(employeeId: string) {
+  const accounts = await prisma.bankAccount.findMany({ where: { employeeId } })
+  return accounts.map(a => ({
+    id: a.id,
+    accountName: a.accountName,
+    bsb: decrypt(a.bsb),
+    accountNumber: decrypt(a.accountNumber),
+    isPrimary: a.isPrimary,
+    allocationPercent: a.allocationPercent,
+  }))
+}
+
+export const bankAccountSchema = z.object({
+  bsb: z.string().regex(/^\d{6}$/, 'BSB must be 6 digits'),
+  accountNumber: z.string().min(5).max(10),
+  accountName: z.string().min(1).max(50),
+  isPrimary: z.boolean().default(false),
+  allocationPercent: z.number().min(1).max(100).optional(),
+})
+
+export async function addMyBankAccount(
+  employeeId: string,
+  data: z.infer<typeof bankAccountSchema>,
+) {
+  if (data.isPrimary) {
+    await prisma.bankAccount.updateMany({
+      where: { employeeId },
+      data: { isPrimary: false },
+    })
+  }
+  return prisma.bankAccount.create({
+    data: {
+      employeeId,
+      bsb: encrypt(data.bsb),
+      accountNumber: encrypt(data.accountNumber),
+      accountName: data.accountName,
+      isPrimary: data.isPrimary,
+      allocationPercent: data.allocationPercent,
+    },
+  })
+}
+
+export async function updateMyBankAccount(
+  accountId: string,
+  employeeId: string,
+  data: Partial<z.infer<typeof bankAccountSchema>>,
+) {
+  const account = await prisma.bankAccount.findFirst({
+    where: { id: accountId, employeeId },
+  })
+  if (!account) throw new NotFoundError('Bank account')
+
+  if (data.isPrimary) {
+    await prisma.bankAccount.updateMany({ where: { employeeId }, data: { isPrimary: false } })
+  }
+
+  return prisma.bankAccount.update({
+    where: { id: accountId },
+    data: {
+      ...(data.bsb ? { bsb: encrypt(data.bsb) } : {}),
+      ...(data.accountNumber ? { accountNumber: encrypt(data.accountNumber) } : {}),
+      ...(data.accountName ? { accountName: data.accountName } : {}),
+      ...(data.isPrimary !== undefined ? { isPrimary: data.isPrimary } : {}),
+      ...(data.allocationPercent !== undefined ? { allocationPercent: data.allocationPercent } : {}),
+    },
+  })
+}
+
+export async function deleteMyBankAccount(accountId: string, employeeId: string) {
+  const account = await prisma.bankAccount.findFirst({ where: { id: accountId, employeeId } })
+  if (!account) throw new NotFoundError('Bank account')
+  if (account.isPrimary) throw new AppError(400, 'Cannot delete your primary bank account. Set another account as primary first.')
+  await prisma.bankAccount.delete({ where: { id: accountId } })
+  return { deleted: true }
+}

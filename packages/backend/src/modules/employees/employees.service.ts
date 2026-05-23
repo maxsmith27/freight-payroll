@@ -33,6 +33,10 @@ export const createEmployeeSchema = z.object({
   superMemberNumber: z.string().optional(),
   superFundUsi: z.string().optional(),
   reportsToId: z.string().optional(),
+  // State of employment — drives public holiday schedule (may differ from residential state)
+  stateOfEmployment: z.enum(['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT']).optional(),
+  // Agreed ordinary hours per week (for part-timers and salaried employees)
+  ordinaryHoursPerWeek: z.number().positive().max(38).optional(),
   // Sensitive — will be encrypted
   taxFileNumber: z.string().regex(/^\d{9}$/, 'TFN must be 9 digits').optional(),
 })
@@ -255,6 +259,8 @@ export async function createEmployee(
       startDate: new Date(data.startDate),
       dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : undefined,
       taxFileNumber: encryptOptional(taxFileNumber),
+      stateOfEmployment: data.stateOfEmployment ?? undefined,
+      ordinaryHoursPerWeek: data.ordinaryHoursPerWeek ?? undefined,
     },
   })
 
@@ -315,8 +321,61 @@ export async function addPayRate(
   createdBy: string,
   depotScope?: string | null,
 ) {
-  const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId, ...(depotScope ? { depotId: depotScope } : {}) } })
+  const employee = await prisma.employee.findFirst({
+    where: { id: employeeId, companyId, ...(depotScope ? { depotId: depotScope } : {}) },
+    include: {
+      awardClassifications: {
+        where: { effectiveTo: null },
+        orderBy: { effectiveFrom: 'desc' },
+        take: 1,
+      },
+    },
+  })
   if (!employee) throw new NotFoundError('Employee')
+
+  // ── Award minimum floor check ──────────────────────────────────────────────
+  // For hourly rates we enforce that the proposed rate is at least the award minimum.
+  if (data.payType === 'HOURLY' && data.hourlyRate && employee.awardClassifications.length > 0) {
+    const classification = employee.awardClassifications[0]
+    const awardMin = await prisma.awardBaseRate.findFirst({
+      where: {
+        award: classification.awardCode,
+        classificationLevel: classification.classificationLevel,
+        effectiveTo: null,
+      },
+      orderBy: { effectiveFrom: 'desc' },
+    })
+    if (awardMin && data.hourlyRate < Number(awardMin.hourlyRate)) {
+      throw new AppError(
+        422,
+        `Rate $${data.hourlyRate.toFixed(2)}/hr is below the award minimum of $${Number(awardMin.hourlyRate).toFixed(2)}/hr for ${classification.classificationLevel.replace('_', ' ')} under ${classification.awardCode}. ` +
+          `The employee's rate must be at or above the award minimum.`,
+      )
+    }
+  }
+  // For salary, convert to hourly equivalent (÷ 52 ÷ 38) and enforce floor
+  if (data.payType === 'SALARY' && data.annualSalary && employee.awardClassifications.length > 0) {
+    const classification = employee.awardClassifications[0]
+    const awardMin = await prisma.awardBaseRate.findFirst({
+      where: {
+        award: classification.awardCode,
+        classificationLevel: classification.classificationLevel,
+        effectiveTo: null,
+      },
+      orderBy: { effectiveFrom: 'desc' },
+    })
+    if (awardMin) {
+      const hourlyEquivalent = data.annualSalary / 52 / 38
+      const minHourly = Number(awardMin.hourlyRate)
+      if (hourlyEquivalent < minHourly) {
+        throw new AppError(
+          422,
+          `Annual salary of $${data.annualSalary.toLocaleString()} equates to $${hourlyEquivalent.toFixed(2)}/hr, which is below the award minimum of $${minHourly.toFixed(2)}/hr. ` +
+            `Minimum equivalent annual salary is $${(minHourly * 38 * 52).toLocaleString(undefined, { maximumFractionDigits: 0 })}.`,
+        )
+      }
+    }
+  }
 
   const effectiveFrom = new Date(data.effectiveFrom)
 

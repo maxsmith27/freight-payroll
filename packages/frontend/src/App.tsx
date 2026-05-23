@@ -24,6 +24,9 @@ import { EmployeeTimesheets } from '@/pages/employee/EmployeeTimesheets'
 import { EmployeeKmLog } from '@/pages/employee/EmployeeKmLog'
 import { EmployeeLeave } from '@/pages/employee/EmployeeLeave'
 import { EmployeePayslips } from '@/pages/employee/EmployeePayslips'
+import { EmployeeProfile } from '@/pages/employee/EmployeeProfile'
+import { EmployeeBankAccounts } from '@/pages/employee/EmployeeBankAccounts'
+import { OnboardingPage } from '@/pages/onboarding/OnboardingPage'
 import { useCompanyRole, isPayrollRole, isManagerRole } from '@/lib/roles'
 import type { CompanyRole } from '@freight-payroll/shared'
 
@@ -40,9 +43,10 @@ const PAYROLL_ROLES: CompanyRole[] = ['COMPANY_ADMIN', 'PAYROLL_MANAGER']
 const MANAGER_ROLES: CompanyRole[] = ['COMPANY_ADMIN', 'PAYROLL_MANAGER', 'DEPOT_MANAGER']
 
 const router = createBrowserRouter([
-  { path: '/login',         element: <LoginPage /> },
-  { path: '/register',      element: <RegisterPage /> },
-  { path: '/auth/callback', element: <SSOCallbackPage /> },
+  { path: '/login',            element: <LoginPage /> },
+  { path: '/register',         element: <RegisterPage /> },
+  { path: '/auth/callback',    element: <SSOCallbackPage /> },
+  { path: '/onboard/:token',   element: <OnboardingPage /> },
 
   // ── Employee self-service portal ─────────────────────────────────────────
   // Accessible by all authenticated users (employees land here automatically;
@@ -53,6 +57,8 @@ const router = createBrowserRouter([
     children: [
       { index: true,              element: <Navigate to="/employee/dashboard" replace /> },
       { path: 'dashboard',        element: <EmployeeDashboard /> },
+      { path: 'profile',          element: <EmployeeProfile /> },
+      { path: 'bank-accounts',    element: <EmployeeBankAccounts /> },
       { path: 'timesheets',       element: <EmployeeTimesheets /> },
       { path: 'km-log',           element: <EmployeeKmLog /> },
       { path: 'leave',            element: <EmployeeLeave /> },

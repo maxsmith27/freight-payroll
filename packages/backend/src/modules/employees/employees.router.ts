@@ -4,6 +4,7 @@ import { authenticate, requireCompanyAccess, getDepotScope } from '../../middlew
 import { validateBody, validateQuery } from '../../middleware/validate.middleware.js'
 import * as service from './employees.service.js'
 import { writeAuditLog } from '../../middleware/audit.middleware.js'
+import prisma from '../../lib/prisma.js'
 
 export const employeesRouter = Router()
 employeesRouter.use(authenticate)
@@ -227,6 +228,18 @@ employeesRouter.delete('/:id/portal-access', adminAccess, async (req: Request, r
       employeeId: req.params.id,
     })
     res.json({ success: true })
+  } catch (err) { next(err) }
+})
+
+// ─── Award minimum rates ───────────────────────────────────────────────────
+
+employeesRouter.get('/award-minimums', anyAccess, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rates = await prisma.awardBaseRate.findMany({
+      where: { effectiveTo: null },
+      orderBy: [{ award: 'asc' }, { classificationLevel: 'asc' }],
+    })
+    res.json({ success: true, data: rates })
   } catch (err) { next(err) }
 })
 

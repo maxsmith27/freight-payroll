@@ -98,6 +98,7 @@ model Company {
   enterpriseAgreements  EnterpriseAgreement[]
   expenseClaims         ExpenseClaim[]
   workplaceIncidents    WorkplaceIncident[]
+  onboardings           EmployeeOnboarding[]
 
   @@index([organizationId])
   @@map("companies")
@@ -289,6 +290,12 @@ model Employee {
   // Onboarding
   inductionCompletedAt DateTime?
 
+  // State of employment (may differ from residential address — drives public holiday schedule)
+  stateOfEmployment AustralianState?
+
+  // Agreed ordinary hours per week (part-timers / salary employees)
+  ordinaryHoursPerWeek Decimal? @db.Decimal(4, 2)
+
   // Reporting line
   reportsToId String?
   reportsTo   Employee? @relation("ReportsTo", fields: [reportsToId], references: [id])
@@ -324,6 +331,7 @@ model Employee {
   subordinates         Employee[]          @relation("ReportsTo")
   availabilities       EmployeeAvailability[]
   trainingRecords      TrainingRecord[]
+  onboardings          EmployeeOnboarding[]
 
   @@unique([companyId, employeeNumber])
   @@index([companyId])
@@ -2162,4 +2170,49 @@ enum AuditAction {
   PORTAL_ACCESS_GRANTED
   PORTAL_ACCESS_REVOKED
   SUBCONTRACTOR_PAYMENT_PROCESSED
+  ONBOARDING_INVITED
+  ONBOARDING_COMPLETED
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// EMPLOYEE ONBOARDING
+// ═══════════════════════════════════════════════════════════════════
+
+model EmployeeOnboarding {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  // Set once the employee record is created on completion
+  employeeId String?
+  employee   Employee? @relation(fields: [employeeId], references: [id])
+
+  inviteEmail String
+  // Secure random token used in the invite URL
+  token       String   @unique
+  expiresAt   DateTime
+
+  status      OnboardingStatus @default(INVITED)
+  completedAt DateTime?
+
+  // JSON snapshot of data the employee entered during onboarding
+  // (preserved even after employee record is created)
+  onboardingData Json?
+
+  invitedBy String // userId of the admin who sent the invite
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([token])
+  @@map("employee_onboardings")
+}
+
+enum OnboardingStatus {
+  INVITED
+  IN_PROGRESS
+  PENDING_REVIEW
+  COMPLETED
+  EXPIRED
 }
