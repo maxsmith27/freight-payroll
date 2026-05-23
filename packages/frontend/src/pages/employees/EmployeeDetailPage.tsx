@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, AlertTriangle, UserCheck, UserX, Send, RotateCcw, XCircle, Clock, UserMinus } from 'lucide-react'
+import { ArrowLeft, AlertTriangle, UserCheck, UserX, Send, RotateCcw, XCircle, Clock, UserMinus, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -137,6 +137,24 @@ export function EmployeeDetailPage() {
   const [terminateReason, setTerminateReason] = useState('')
   const [terminateError, setTerminateError] = useState('')
 
+  // ── Bank account form state ──
+  const [showAddBank, setShowAddBank] = useState(false)
+  const [bankForm, setBankForm] = useState({ accountName: '', bsb: '', accountNumber: '', isPrimary: false })
+  const [bankError, setBankError] = useState('')
+
+  // ── Compliance form state ──
+  const [showAddLicence, setShowAddLicence] = useState(false)
+  const [licenceForm, setLicenceForm] = useState({ licenceNumber: '', licenceState: '', licenceClasses: [] as string[], issueDate: '', expiryDate: '' })
+  const [licenceError, setLicenceError] = useState('')
+
+  const [showAddAccred, setShowAddAccred] = useState(false)
+  const [accredForm, setAccredForm] = useState({ accreditationType: '', certificateNumber: '', issueDate: '', expiryDate: '' })
+  const [accredError, setAccredError] = useState('')
+
+  const [showAddMedical, setShowAddMedical] = useState(false)
+  const [medicalForm, setMedicalForm] = useState({ certType: '', issueDate: '', expiryDate: '', restrictions: '' })
+  const [medicalError, setMedicalError] = useState('')
+
   const { data: emp, isLoading, isError, error } = useQuery<EmployeeDetail>({
     queryKey: ['employee', id],
     queryFn: async () => {
@@ -184,6 +202,69 @@ export function EmployeeDetailPage() {
       toast({ title: 'Employee terminated', description: `${emp?.firstName} ${emp?.lastName} has been marked as inactive.` })
     },
     onError: err => setTerminateError(apiError(err)),
+  })
+
+  const addBankMutation = useMutation({
+    mutationFn: () => api.post(`/employees/${id}/bank-accounts?companyId=${activeCompanyId}`, {
+      accountName: bankForm.accountName,
+      bsb: bankForm.bsb.replace(/\D/g, ''),
+      accountNumber: bankForm.accountNumber,
+      isPrimary: bankForm.isPrimary,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employee', id] })
+      setShowAddBank(false)
+      setBankForm({ accountName: '', bsb: '', accountNumber: '', isPrimary: false })
+      setBankError('')
+      toast({ title: 'Bank account added' })
+    },
+    onError: err => setBankError(apiError(err)),
+  })
+
+  const addLicenceMutation = useMutation({
+    mutationFn: () => api.post(`/compliance/employees/${id}/licences?companyId=${activeCompanyId}`, licenceForm),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employee', id] })
+      setShowAddLicence(false)
+      setLicenceForm({ licenceNumber: '', licenceState: '', licenceClasses: [], issueDate: '', expiryDate: '' })
+      setLicenceError('')
+      toast({ title: 'Licence added' })
+    },
+    onError: err => setLicenceError(apiError(err)),
+  })
+
+  const addAccredMutation = useMutation({
+    mutationFn: () => api.post(`/compliance/employees/${id}/accreditations?companyId=${activeCompanyId}`, {
+      accreditationType: accredForm.accreditationType,
+      certificateNumber: accredForm.certificateNumber || undefined,
+      issueDate: accredForm.issueDate,
+      expiryDate: accredForm.expiryDate || undefined,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employee', id] })
+      setShowAddAccred(false)
+      setAccredForm({ accreditationType: '', certificateNumber: '', issueDate: '', expiryDate: '' })
+      setAccredError('')
+      toast({ title: 'Accreditation added' })
+    },
+    onError: err => setAccredError(apiError(err)),
+  })
+
+  const addMedicalMutation = useMutation({
+    mutationFn: () => api.post(`/compliance/employees/${id}/medicals?companyId=${activeCompanyId}`, {
+      certType: medicalForm.certType,
+      issueDate: medicalForm.issueDate,
+      expiryDate: medicalForm.expiryDate,
+      restrictions: medicalForm.restrictions || undefined,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employee', id] })
+      setShowAddMedical(false)
+      setMedicalForm({ certType: '', issueDate: '', expiryDate: '', restrictions: '' })
+      setMedicalError('')
+      toast({ title: 'Medical certificate added' })
+    },
+    onError: err => setMedicalError(apiError(err)),
   })
 
   if (isLoading) {
@@ -412,12 +493,17 @@ export function EmployeeDetailPage() {
 
           {/* ── Compliance ── */}
           <TabsContent value="compliance" className="space-y-4">
+
+            {/* Driver licences */}
             <Card>
-              <CardHeader><CardTitle className="text-base">Driver licences</CardTitle></CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between pb-3">
+                <CardTitle className="text-base">Driver licences</CardTitle>
+                <Button size="sm" variant="outline" onClick={() => { setShowAddLicence(b => !b); setLicenceError('') }}>
+                  <Plus className="h-4 w-4 mr-1" />Add licence
+                </Button>
+              </CardHeader>
               <CardContent className="p-0">
-                {emp.licences.length === 0 ? (
-                  <div className="p-6 text-sm text-muted-foreground">No licences recorded.</div>
-                ) : (
+                {emp.licences.length > 0 && (
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/40">
@@ -451,15 +537,84 @@ export function EmployeeDetailPage() {
                     </tbody>
                   </table>
                 )}
+                {emp.licences.length === 0 && !showAddLicence && (
+                  <div className="p-6 text-sm text-muted-foreground">No licences recorded.</div>
+                )}
+                {showAddLicence && (
+                  <div className="border-t p-4 space-y-3 bg-muted/20">
+                    <p className="text-sm font-medium">Add driver licence</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label>Licence number</Label>
+                        <Input value={licenceForm.licenceNumber} onChange={e => setLicenceForm(f => ({ ...f, licenceNumber: e.target.value }))} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>State</Label>
+                        <select
+                          className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          value={licenceForm.licenceState}
+                          onChange={e => setLicenceForm(f => ({ ...f, licenceState: e.target.value }))}
+                        >
+                          <option value="">Select state</option>
+                          {['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'].map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Issue date</Label>
+                        <Input type="date" value={licenceForm.issueDate} onChange={e => setLicenceForm(f => ({ ...f, issueDate: e.target.value }))} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Expiry date</Label>
+                        <Input type="date" value={licenceForm.expiryDate} onChange={e => setLicenceForm(f => ({ ...f, expiryDate: e.target.value }))} />
+                      </div>
+                      <div className="col-span-2 space-y-1.5">
+                        <Label>Licence classes</Label>
+                        <div className="flex gap-4 flex-wrap pt-1">
+                          {['C', 'LR', 'MR', 'HR', 'HC', 'MC'].map(cls => (
+                            <label key={cls} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={licenceForm.licenceClasses.includes(cls)}
+                                onChange={e => setLicenceForm(f => ({
+                                  ...f,
+                                  licenceClasses: e.target.checked
+                                    ? [...f.licenceClasses, cls]
+                                    : f.licenceClasses.filter(c => c !== cls),
+                                }))}
+                                className="rounded"
+                              />
+                              {cls}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    {licenceError && <p className="text-sm text-destructive">{licenceError}</p>}
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => addLicenceMutation.mutate()}
+                        disabled={addLicenceMutation.isPending || !licenceForm.licenceNumber || !licenceForm.licenceState || !licenceForm.issueDate || !licenceForm.expiryDate || licenceForm.licenceClasses.length === 0}
+                      >
+                        {addLicenceMutation.isPending ? 'Saving…' : 'Save licence'}
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => { setShowAddLicence(false); setLicenceError('') }}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
+            {/* Accreditations */}
             <Card>
-              <CardHeader><CardTitle className="text-base">Accreditations</CardTitle></CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between pb-3">
+                <CardTitle className="text-base">Accreditations</CardTitle>
+                <Button size="sm" variant="outline" onClick={() => { setShowAddAccred(b => !b); setAccredError('') }}>
+                  <Plus className="h-4 w-4 mr-1" />Add accreditation
+                </Button>
+              </CardHeader>
               <CardContent className="p-0">
-                {emp.accreditations.length === 0 ? (
-                  <div className="p-6 text-sm text-muted-foreground">No accreditations recorded.</div>
-                ) : (
+                {emp.accreditations.length > 0 && (
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/40">
@@ -471,7 +626,7 @@ export function EmployeeDetailPage() {
                     <tbody>
                       {emp.accreditations.map(a => (
                         <tr key={a.id} className="border-b last:border-0">
-                          <td className="px-4 py-3">{a.accreditationType}</td>
+                          <td className="px-4 py-3">{a.accreditationType.replace(/_/g, ' ')}</td>
                           <td className="px-4 py-3 text-muted-foreground">{a.certificateNumber ?? '—'}</td>
                           <td className="px-4 py-3 text-muted-foreground">
                             {a.expiryDate ? formatDate(a.expiryDate) : '—'}
@@ -481,15 +636,71 @@ export function EmployeeDetailPage() {
                     </tbody>
                   </table>
                 )}
+                {emp.accreditations.length === 0 && !showAddAccred && (
+                  <div className="p-6 text-sm text-muted-foreground">No accreditations recorded.</div>
+                )}
+                {showAddAccred && (
+                  <div className="border-t p-4 space-y-3 bg-muted/20">
+                    <p className="text-sm font-medium">Add accreditation</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5 col-span-2">
+                        <Label>Type</Label>
+                        <select
+                          className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          value={accredForm.accreditationType}
+                          onChange={e => setAccredForm(f => ({ ...f, accreditationType: e.target.value }))}
+                        >
+                          <option value="">Select type</option>
+                          <option value="DANGEROUS_GOODS">Dangerous Goods</option>
+                          <option value="HEAVY_VEHICLE_MASS_MANAGEMENT">Heavy Vehicle Mass Management</option>
+                          <option value="HEAVY_VEHICLE_MAINTENANCE">Heavy Vehicle Maintenance</option>
+                          <option value="BASIC_FATIGUE_MANAGEMENT">Basic Fatigue Management</option>
+                          <option value="ADVANCED_FATIGUE_MANAGEMENT">Advanced Fatigue Management</option>
+                          <option value="FORKLIFT">Forklift</option>
+                          <option value="FIRST_AID">First Aid</option>
+                          <option value="WHITE_CARD">White Card</option>
+                          <option value="OTHER">Other</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Certificate # <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                        <Input value={accredForm.certificateNumber} onChange={e => setAccredForm(f => ({ ...f, certificateNumber: e.target.value }))} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Issue date</Label>
+                        <Input type="date" value={accredForm.issueDate} onChange={e => setAccredForm(f => ({ ...f, issueDate: e.target.value }))} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Expiry date <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                        <Input type="date" value={accredForm.expiryDate} onChange={e => setAccredForm(f => ({ ...f, expiryDate: e.target.value }))} />
+                      </div>
+                    </div>
+                    {accredError && <p className="text-sm text-destructive">{accredError}</p>}
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => addAccredMutation.mutate()}
+                        disabled={addAccredMutation.isPending || !accredForm.accreditationType || !accredForm.issueDate}
+                      >
+                        {addAccredMutation.isPending ? 'Saving…' : 'Save accreditation'}
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => { setShowAddAccred(false); setAccredError('') }}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
+            {/* Medical certificates */}
             <Card>
-              <CardHeader><CardTitle className="text-base">Medical certificates</CardTitle></CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between pb-3">
+                <CardTitle className="text-base">Medical certificates</CardTitle>
+                <Button size="sm" variant="outline" onClick={() => { setShowAddMedical(b => !b); setMedicalError('') }}>
+                  <Plus className="h-4 w-4 mr-1" />Add medical
+                </Button>
+              </CardHeader>
               <CardContent className="p-0">
-                {emp.medicalCerts.length === 0 ? (
-                  <div className="p-6 text-sm text-muted-foreground">No medicals recorded.</div>
-                ) : (
+                {emp.medicalCerts.length > 0 && (
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/40">
@@ -502,7 +713,7 @@ export function EmployeeDetailPage() {
                     <tbody>
                       {emp.medicalCerts.map(m => (
                         <tr key={m.id} className="border-b last:border-0">
-                          <td className="px-4 py-3">{m.certType}</td>
+                          <td className="px-4 py-3">{m.certType.replace(/_/g, ' ')}</td>
                           <td className="px-4 py-3 text-muted-foreground">{formatDate(m.issueDate)}</td>
                           <td className="px-4 py-3 text-muted-foreground">
                             {m.expiryDate ? formatDate(m.expiryDate) : '—'}
@@ -513,6 +724,52 @@ export function EmployeeDetailPage() {
                     </tbody>
                   </table>
                 )}
+                {emp.medicalCerts.length === 0 && !showAddMedical && (
+                  <div className="p-6 text-sm text-muted-foreground">No medicals recorded.</div>
+                )}
+                {showAddMedical && (
+                  <div className="border-t p-4 space-y-3 bg-muted/20">
+                    <p className="text-sm font-medium">Add medical certificate</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5 col-span-2">
+                        <Label>Type</Label>
+                        <select
+                          className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          value={medicalForm.certType}
+                          onChange={e => setMedicalForm(f => ({ ...f, certType: e.target.value }))}
+                        >
+                          <option value="">Select type</option>
+                          <option value="COMMERCIAL_VEHICLE_DRIVER">Commercial Vehicle Driver</option>
+                          <option value="DANGEROUS_GOODS_DRIVER">Dangerous Goods Driver</option>
+                          <option value="ANNUAL_MEDICAL">Annual Medical</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Issue date</Label>
+                        <Input type="date" value={medicalForm.issueDate} onChange={e => setMedicalForm(f => ({ ...f, issueDate: e.target.value }))} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Expiry date</Label>
+                        <Input type="date" value={medicalForm.expiryDate} onChange={e => setMedicalForm(f => ({ ...f, expiryDate: e.target.value }))} />
+                      </div>
+                      <div className="space-y-1.5 col-span-2">
+                        <Label>Restrictions <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                        <Input value={medicalForm.restrictions} onChange={e => setMedicalForm(f => ({ ...f, restrictions: e.target.value }))} placeholder="e.g. Corrective lenses required" />
+                      </div>
+                    </div>
+                    {medicalError && <p className="text-sm text-destructive">{medicalError}</p>}
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => addMedicalMutation.mutate()}
+                        disabled={addMedicalMutation.isPending || !medicalForm.certType || !medicalForm.issueDate || !medicalForm.expiryDate}
+                      >
+                        {addMedicalMutation.isPending ? 'Saving…' : 'Save medical'}
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => { setShowAddMedical(false); setMedicalError('') }}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -520,11 +777,14 @@ export function EmployeeDetailPage() {
           {/* ── Banking ── */}
           <TabsContent value="bank">
             <Card>
-              <CardHeader><CardTitle className="text-base">Bank accounts</CardTitle></CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between pb-3">
+                <CardTitle className="text-base">Bank accounts</CardTitle>
+                <Button size="sm" variant="outline" onClick={() => { setShowAddBank(b => !b); setBankError('') }}>
+                  <Plus className="h-4 w-4 mr-1" />Add account
+                </Button>
+              </CardHeader>
               <CardContent className="p-0">
-                {emp.bankAccounts.length === 0 ? (
-                  <div className="p-6 text-sm text-muted-foreground">No bank accounts on file.</div>
-                ) : (
+                {emp.bankAccounts.length > 0 && (
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/40">
@@ -547,6 +807,64 @@ export function EmployeeDetailPage() {
                       ))}
                     </tbody>
                   </table>
+                )}
+                {emp.bankAccounts.length === 0 && !showAddBank && (
+                  <div className="p-6 text-sm text-muted-foreground">No bank accounts on file. Click Add account to add one.</div>
+                )}
+                {showAddBank && (
+                  <div className="border-t p-4 space-y-3 bg-muted/20">
+                    <p className="text-sm font-medium">New bank account</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label>Account name</Label>
+                        <Input
+                          value={bankForm.accountName}
+                          onChange={e => setBankForm(f => ({ ...f, accountName: e.target.value }))}
+                          placeholder="e.g. John Smith"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>BSB <span className="text-xs text-muted-foreground">(6 digits, no dashes)</span></Label>
+                        <Input
+                          value={bankForm.bsb}
+                          onChange={e => setBankForm(f => ({ ...f, bsb: e.target.value.replace(/\D/g, '') }))}
+                          placeholder="123456"
+                          maxLength={6}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Account number</Label>
+                        <Input
+                          value={bankForm.accountNumber}
+                          onChange={e => setBankForm(f => ({ ...f, accountNumber: e.target.value.replace(/\D/g, '') }))}
+                          placeholder="12345678"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 pt-6">
+                        <input
+                          type="checkbox"
+                          id="bankIsPrimary"
+                          checked={bankForm.isPrimary}
+                          onChange={e => setBankForm(f => ({ ...f, isPrimary: e.target.checked }))}
+                          className="rounded"
+                        />
+                        <Label htmlFor="bankIsPrimary">Set as primary account</Label>
+                      </div>
+                    </div>
+                    {bankError && <p className="text-sm text-destructive">{bankError}</p>}
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => addBankMutation.mutate()}
+                        disabled={addBankMutation.isPending || !bankForm.accountName || bankForm.bsb.length !== 6 || !bankForm.accountNumber}
+                      >
+                        {addBankMutation.isPending ? 'Saving…' : 'Save account'}
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => { setShowAddBank(false); setBankError('') }}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
                 )}
               </CardContent>
             </Card>

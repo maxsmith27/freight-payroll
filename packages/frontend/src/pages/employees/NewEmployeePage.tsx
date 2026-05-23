@@ -75,15 +75,18 @@ const EMPLOYMENT_TYPE_EXPLANATIONS: Record<string, string> = {
 export function NewEmployeePage() {
   const navigate = useNavigate()
   const { activeCompanyId } = useAuthStore()
-  const [error, setError] = useState('')
+  const [submitError, setSubmitError] = useState('')
   const [showWizard, setShowWizard] = useState(false)
   const [awardSuggestion, setAwardSuggestion] = useState<string | null>(null)
+  const [minimumRate, setMinimumRate] = useState<number | null>(null)
 
   const {
     register,
     handleSubmit,
     watch,
     setValue,
+    setError,
+    clearErrors,
     formState: { errors, isSubmitting },
   } = useForm<NewEmployeeForm>({
     resolver: zodResolver(newEmployeeSchema),
@@ -116,10 +119,12 @@ export function NewEmployeePage() {
   const watchedGrade = watch('classificationLevel')
   const watchedPayType = watch('payType')
   const watchedEmploymentType = watch('employmentType')
+  const watchedBaseRate = watch('baseRate')
 
   useEffect(() => {
     if (!awardMinimumsData || !watchedAward || !watchedGrade) {
       setAwardSuggestion(null)
+      setMinimumRate(null)
       return
     }
 
@@ -128,6 +133,7 @@ export function NewEmployeePage() {
     )
     if (!match) {
       setAwardSuggestion(null)
+      setMinimumRate(null)
       return
     }
 
@@ -135,16 +141,33 @@ export function NewEmployeePage() {
 
     if (watchedPayType === 'HOURLY') {
       setValue('baseRate', hourlyMin)
+      setMinimumRate(hourlyMin)
       setAwardSuggestion(`Award minimum: $${hourlyMin.toFixed(2)}/hr for ${watchedGrade.replace('GRADE_', 'Grade ')} under ${watchedAward}`)
     } else if (watchedPayType === 'SALARY') {
-      const annualMin = hourlyMin * 38 * 52
-      setValue('baseRate', Math.ceil(annualMin))
-      setAwardSuggestion(`Award minimum: $${Math.ceil(annualMin).toLocaleString()}/yr (based on $${hourlyMin.toFixed(2)}/hr × 38 × 52)`)
+      const annualMin = Math.ceil(hourlyMin * 38 * 52)
+      setValue('baseRate', annualMin)
+      setMinimumRate(annualMin)
+      setAwardSuggestion(`Award minimum: $${annualMin.toLocaleString()}/yr (based on $${hourlyMin.toFixed(2)}/hr × 38 × 52)`)
     } else {
       // PER_KM, PER_LOAD, PERCENTAGE_REVENUE — no award floor for these
       setAwardSuggestion(null)
+      setMinimumRate(null)
     }
   }, [watchedAward, watchedGrade, watchedPayType, awardMinimumsData, setValue])
+
+  // ── Enforce award minimum — flag if rate is manually lowered below it ───
+
+  useEffect(() => {
+    if (minimumRate == null) {
+      clearErrors('baseRate')
+      return
+    }
+    if (watchedBaseRate !== undefined && Number(watchedBaseRate) < minimumRate) {
+      setError('baseRate', { type: 'manual', message: 'Below award minimum — see rate suggestion above' })
+    } else {
+      clearErrors('baseRate')
+    }
+  }, [watchedBaseRate, minimumRate, setError, clearErrors])
 
   // ── Wizard ──────────────────────────────────────────────────────────────
 
@@ -156,7 +179,12 @@ export function NewEmployeePage() {
   // ── Submit — 3-step: create employee → classification → pay rate ────────
 
   async function onSubmit(values: NewEmployeeForm) {
-    setError('')
+    setSubmitError('')
+    // Belt-and-suspenders: block if below minimum even if the UI error was dismissed
+    if (minimumRate !== null && values.baseRate < minimumRate) {
+      setError('baseRate', { type: 'manual', message: 'Below award minimum — see rate suggestion above' })
+      return
+    }
     try {
       const cq = `companyId=${activeCompanyId}`
       const startDateISO = new Date(values.startDate).toISOString()
@@ -200,7 +228,7 @@ export function NewEmployeePage() {
 
       navigate(`/employees/${employeeId}`)
     } catch (err) {
-      setError(apiError(err))
+      setSubmitError(apiError(err))
     }
   }
 
@@ -405,8 +433,8 @@ export function NewEmployeePage() {
             </CardContent>
           </Card>
 
-          {error && (
-            <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>
+          {submitError && (
+            <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{submitError}</div>
           )}
 
           <div className="flex gap-3">

@@ -13,6 +13,7 @@ import { generateABAFile } from './generators/aba.generator.js'
 import { generatePayslipPDF } from './generators/payslip.generator.js'
 import { generateSTPPayEventPayload } from './generators/stp.generator.js'
 import { PENALTY_RATES, formatCurrency, getFinancialYearStart } from '@freight-payroll/shared'
+import { processLeaveAccruals } from '../leave/leave.service.js'
 import type { PayslipData } from '@freight-payroll/shared'
 import type { Prisma } from '@prisma/client'
 
@@ -332,6 +333,14 @@ export async function finalisePayRun(
     where: { payRunId },
     data: { status: 'FINALISED' },
   })
+
+  // Accrue leave for all active employees in this company for the pay period
+  await processLeaveAccruals(
+    companyId,
+    payRun.periodStartDate,
+    payRun.periodEndDate,
+    payRun.payFrequency,
+  )
 
   return getPayRun(payRunId, companyId)
 }
