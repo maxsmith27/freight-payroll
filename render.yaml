@@ -2,9 +2,9 @@ services:
   - type: web
     name: freight-payroll-backend
     runtime: node
-    rootDir: packages/backend
-    buildCommand: npm install && prisma migrate deploy && npm run build
-    startCommand: npm run start
+    # No rootDir — run from repo root so pnpm can resolve workspace:* dependencies
+    buildCommand: npm install -g pnpm@9.15.0 && pnpm install --frozen-lockfile && pnpm --filter @freight-payroll/shared run build && pnpm --filter @freight-payroll/backend exec -- prisma migrate deploy && pnpm --filter @freight-payroll/backend run build
+    startCommand: node packages/backend/dist/index.js
     envVars:
       - key: NODE_ENV
         value: production
