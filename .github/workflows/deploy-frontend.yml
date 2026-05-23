@@ -57,7 +57,23 @@ jobs:
         run: |
           mkdir -p .vercel/output/static
           cp -r packages/frontend/dist/. .vercel/output/static/
-          echo '{"version":3}' > .vercel/output/config.json
+          # SPA routing + cache headers:
+          #  - JS/CSS assets: immutable (content-hashed filenames change on every build)
+          #  - index.html: no-store so browsers never serve a stale entry-point after deploy
+          #  - All unknown paths: fall back to index.html (client-side routing)
+          python3 -c "
+          import json
+          cfg = {
+            'version': 3,
+            'routes': [
+              {'src': '/assets/(.+)', 'headers': {'cache-control': 'public, max-age=31536000, immutable'}, 'continue': True},
+              {'src': '/index.html',  'headers': {'cache-control': 'no-store'}, 'continue': True},
+              {'handle': 'filesystem'},
+              {'src': '/(.*)', 'dest': '/index.html', 'headers': {'cache-control': 'no-store'}}
+            ]
+          }
+          print(json.dumps(cfg, indent=2))
+          " > .vercel/output/config.json
 
       - name: Deploy to Vercel
         run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
