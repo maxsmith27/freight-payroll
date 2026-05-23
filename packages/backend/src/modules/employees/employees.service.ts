@@ -6,7 +6,7 @@ import { encrypt, decrypt, encryptOptional, decryptOptional } from '../../lib/cr
 // ─── Schemas ────────────────────────────────────────────────────────────────
 
 export const createEmployeeSchema = z.object({
-  employeeNumber: z.string().min(1).max(20),
+  employeeNumber: z.string().min(1).max(20).optional(), // auto-generated if omitted
   depotId: z.string().optional(),
   firstName: z.string().min(1).max(50),
   middleName: z.string().max(50).optional(),
@@ -244,17 +244,33 @@ export async function createEmployee(
   data: z.infer<typeof createEmployeeSchema>,
   createdBy: string,
 ) {
+  // Auto-generate employee number if not provided
+  let employeeNumber = data.employeeNumber
+  if (!employeeNumber) {
+    const last = await prisma.employee.findFirst({
+      where: { companyId },
+      orderBy: { createdAt: 'desc' },
+      select: { employeeNumber: true },
+    })
+    const lastNum = last?.employeeNumber
+      ? parseInt(last.employeeNumber.replace(/\D/g, '') || '0', 10)
+      : 0
+    employeeNumber = String(lastNum + 1).padStart(4, '0')
+  }
+
   // Check employee number uniqueness
   const existing = await prisma.employee.findUnique({
-    where: { companyId_employeeNumber: { companyId, employeeNumber: data.employeeNumber } },
+    where: { companyId_employeeNumber: { companyId, employeeNumber } },
   })
-  if (existing) throw new AppError(409, `Employee number ${data.employeeNumber} is already in use`)
+  if (existing) throw new AppError(409, `Employee number ${employeeNumber} is already in use`)
 
-  const { taxFileNumber, ...rest } = data
+  // Exclude employeeNumber from rest — use the locally generated/validated variable
+  const { taxFileNumber, employeeNumber: _empNum, ...rest } = data
 
   const employee = await prisma.employee.create({
     data: {
       ...rest,
+      employeeNumber,
       companyId,
       startDate: new Date(data.startDate),
       dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : undefined,

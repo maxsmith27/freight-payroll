@@ -56,6 +56,18 @@ employeesRouter.post('/', payrollAccess, validateBody(service.createEmployeeSche
   } catch (err) { next(err) }
 })
 
+// ─── Award minimum rates ── (must be before /:id so Express doesn't swallow it)
+
+employeesRouter.get('/award-minimums', anyAccess, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rates = await prisma.awardBaseRate.findMany({
+      where: { effectiveTo: null },
+      orderBy: [{ award: 'asc' }, { classificationLevel: 'asc' }],
+    })
+    res.json({ success: true, data: rates })
+  } catch (err) { next(err) }
+})
+
 // ─── Get employee ───────────────────────────────────────────────────────────
 
 employeesRouter.get('/:id', anyAccess, async (req: Request, res: Response, next: NextFunction) => {
@@ -228,18 +240,6 @@ employeesRouter.delete('/:id/portal-access', adminAccess, async (req: Request, r
       employeeId: req.params.id,
     })
     res.json({ success: true })
-  } catch (err) { next(err) }
-})
-
-// ─── Award minimum rates ───────────────────────────────────────────────────
-
-employeesRouter.get('/award-minimums', anyAccess, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const rates = await prisma.awardBaseRate.findMany({
-      where: { effectiveTo: null },
-      orderBy: [{ award: 'asc' }, { classificationLevel: 'asc' }],
-    })
-    res.json({ success: true, data: rates })
   } catch (err) { next(err) }
 })
 

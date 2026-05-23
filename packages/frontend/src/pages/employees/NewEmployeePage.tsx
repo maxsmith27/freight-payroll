@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
+import { useQuery } from '@tanstack/react-query'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Loader2, Wand2, Info } from 'lucide-react'
+import { Loader2, Wand2, Info, TrendingUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,6 +13,8 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { useAuthStore } from '@/store/auth.store'
 import { api, apiError } from '@/lib/api'
 import { AwardWizard, type AwardRecommendation } from '@/components/employees/AwardWizard'
+
+// ─── Form schema (matches backend field names exactly) ─────────────────────
 
 const newEmployeeSchema = z.object({
   firstName: z.string().min(1, 'Required'),
@@ -22,19 +25,37 @@ const newEmployeeSchema = z.object({
   employmentType: z.enum(['FULL_TIME', 'PART_TIME', 'CASUAL', 'CONTRACTOR']),
   startDate: z.string().min(1, 'Required'),
   payFrequency: z.enum(['WEEKLY', 'FORTNIGHTLY', 'MONTHLY']),
-  awardCode: z.enum(['MA000038', 'MA000039']).optional(),
-  classificationLevel: z.enum(['GRADE_1', 'GRADE_2', 'GRADE_3', 'GRADE_4', 'GRADE_5']).optional(),
-  payType: z.enum(['HOURLY', 'SALARY', 'KILOMETRE', 'LOAD', 'REVENUE_SHARE']),
+  awardCode: z.enum(['MA000038', 'MA000039']).optional().or(z.literal('')),
+  classificationLevel: z
+    .enum(['GRADE_1', 'GRADE_2', 'GRADE_3', 'GRADE_4', 'GRADE_5'])
+    .optional()
+    .or(z.literal('')),
+  // Pay rate (handled separately after employee creation)
+  payType: z.enum(['HOURLY', 'SALARY', 'PER_KM', 'PER_LOAD', 'PERCENTAGE_REVENUE']),
   baseRate: z.coerce.number().min(0, 'Must be ≥ 0'),
-  tfn: z.string().optional(),
-  taxResidencyStatus: z.enum(['RESIDENT', 'NON_RESIDENT', 'WORKING_HOLIDAY_MAKER']),
+  // Tax — exact backend field names
+  taxFileNumber: z.string().optional(),
+  taxResidencyStatus: z.enum(['RESIDENT', 'FOREIGN_RESIDENT', 'WORKING_HOLIDAY_MAKER']),
   claimsTaxFreeThreshold: z.boolean(),
-  hasHECS: z.boolean(),
+  hasHECSDebt: z.boolean(),
   superFundName: z.string().optional(),
   superMemberNumber: z.string().optional(),
 })
 
 type NewEmployeeForm = z.infer<typeof newEmployeeSchema>
+
+// ─── Award minimum rate lookup type ────────────────────────────────────────
+
+interface AwardBaseRate {
+  id: string
+  award: string
+  classificationLevel: string
+  hourlyRate: string
+  effectiveFrom: string
+  effectiveTo: string | null
+}
+
+// ─── Employment type explanations ──────────────────────────────────────────
 
 const EMPLOYMENT_TYPE_EXPLANATIONS: Record<string, string> = {
   FULL_TIME:  'Works regular hours each week (typically 38 hrs). Entitled to annual leave, personal leave, and other NES entitlements.',
@@ -43,11 +64,14 @@ const EMPLOYMENT_TYPE_EXPLANATIONS: Record<string, string> = {
   CONTRACTOR: 'Engaged under a services agreement. Not an employee — no PAYG withholding applies unless they quote an ABN.',
 }
 
+// ─── Component ─────────────────────────────────────────────────────────────
+
 export function NewEmployeePage() {
   const navigate = useNavigate()
   const { activeCompanyId } = useAuthStore()
   const [error, setError] = useState('')
   const [showWizard, setShowWizard] = useState(false)
+  const [awardSuggestion, setAwardSuggestion] = useState<string | null>(null)
 
   const {
     register,
@@ -63,27 +87,112 @@ export function NewEmployeePage() {
       payType: 'HOURLY',
       taxResidencyStatus: 'RESIDENT',
       claimsTaxFreeThreshold: true,
-      hasHECS: false,
+      hasHECSDebt: false,
       baseRate: 0,
     },
   })
+
+  // ── Load award minimum rates ────────────────────────────────────────────
+
+  const { data: awardMinimumsData } = useQuery({
+    queryKey: ['award-minimums', activeCompanyId],
+    queryFn: async () => {
+      const { data } = await api.get(`/employees/award-minimums?companyId=${activeCompanyId}`)
+      return data.data as AwardBaseRate[]
+    },
+    enabled: !!activeCompanyId,
+    staleTime: 1000 * 60 * 60, // 1 hour — award rates rarely change
+  })
+
+  // ── Auto-fill minimum rate when award + grade + payType changes ─────────
+
+  const watchedAward = watch('awardCode')
+  const watchedGrade = watch('classificationLevel')
+  const watchedPayType = watch('payType')
+  const watchedEmploymentType = watch('employmentType')
+
+  useEffect(() => {
+    if (!awardMinimumsData || !watchedAward || !watchedGrade) {
+      setAwardSuggestion(null)
+      return
+    }
+
+    const match = awardMinimumsData.find(
+      r => r.award === watchedAward && r.classificationLevel === watchedGrade,
+    )
+    if (!match) {
+      setAwardSuggestion(null)
+      return
+    }
+
+    const hourlyMin = parseFloat(match.hourlyRate)
+
+    if (watchedPayType === 'HOURLY') {
+      setValue('baseRate', hourlyMin)
+      setAwardSuggestion(`Award minimum: $${hourlyMin.toFixed(2)}/hr for ${watchedGrade.replace('GRADE_', 'Grade ')} under ${watchedAward}`)
+    } else if (watchedPayType === 'SALARY') {
+      const annualMin = hourlyMin * 38 * 52
+      setValue('baseRate', Math.ceil(annualMin))
+      setAwardSuggestion(`Award minimum: $${Math.ceil(annualMin).toLocaleString()}/yr (based on $${hourlyMin.toFixed(2)}/hr × 38 × 52)`)
+    } else {
+      // PER_KM, PER_LOAD, PERCENTAGE_REVENUE — no award floor for these
+      setAwardSuggestion(null)
+    }
+  }, [watchedAward, watchedGrade, watchedPayType, awardMinimumsData, setValue])
+
+  // ── Wizard ──────────────────────────────────────────────────────────────
 
   function applyWizardRecommendation(rec: AwardRecommendation) {
     setValue('awardCode', rec.awardCode)
     if (rec.classificationLevel) setValue('classificationLevel', rec.classificationLevel)
   }
 
-  const watchedEmploymentType = watch('employmentType')
+  // ── Submit — 3-step: create employee → classification → pay rate ────────
 
   async function onSubmit(values: NewEmployeeForm) {
     setError('')
     try {
-      const { data } = await api.post(`/employees?companyId=${activeCompanyId}`, {
-        ...values,
-        startDate: values.startDate ? new Date(values.startDate).toISOString() : undefined,
+      const cq = `companyId=${activeCompanyId}`
+      const startDateISO = new Date(values.startDate).toISOString()
+
+      // ── Step 1: Create employee record ──────────────────────────────────
+      const employeePayload: Record<string, unknown> = {
+        firstName: values.firstName,
+        lastName: values.lastName,
+        email: values.email || undefined,
+        phone: values.phone || undefined,
         dateOfBirth: values.dateOfBirth ? new Date(values.dateOfBirth).toISOString() : undefined,
-      })
-      navigate(`/employees/${data.data.id}`)
+        employmentType: values.employmentType,
+        startDate: startDateISO,
+        payFrequency: values.payFrequency,
+        awardCode: values.awardCode || undefined,
+        taxResidencyStatus: values.taxResidencyStatus,
+        claimsTaxFreeThreshold: values.claimsTaxFreeThreshold,
+        hasHECSDebt: values.hasHECSDebt,
+        taxFileNumber: values.taxFileNumber || undefined,
+        superFundName: values.superFundName || undefined,
+        superMemberNumber: values.superMemberNumber || undefined,
+      }
+
+      const { data: createData } = await api.post(`/employees?${cq}`, employeePayload)
+      const employeeId = createData.data.id
+
+      // ── Step 2: Add award classification (if both award + grade selected) ─
+      if (values.awardCode && values.classificationLevel) {
+        await api.post(`/employees/${employeeId}/classifications?${cq}`, {
+          effectiveFrom: startDateISO,
+          awardCode: values.awardCode,
+          classificationLevel: values.classificationLevel,
+        })
+      }
+
+      // ── Step 3: Add pay rate ────────────────────────────────────────────
+      if (values.baseRate > 0) {
+        const payRatePayload = buildPayRatePayload(values.payType, values.baseRate, startDateISO)
+        await api.post(`/employees/${employeeId}/pay-rates?${cq}`, payRatePayload)
+      }
+
+      navigate(`/employees/${employeeId}`)
     } catch (err) {
       setError(apiError(err))
     }
@@ -101,6 +210,7 @@ export function NewEmployeePage() {
 
       <div className="p-6">
         <form onSubmit={handleSubmit(onSubmit)} className="max-w-2xl space-y-6">
+
           {/* Personal */}
           <Card>
             <CardHeader><CardTitle className="text-base">Personal details</CardTitle></CardHeader>
@@ -136,7 +246,10 @@ export function NewEmployeePage() {
             <CardContent className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label>Employment type *</Label>
-                <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" {...register('employmentType')}>
+                <select
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  {...register('employmentType')}
+                >
                   <option value="FULL_TIME">Full-time — 38 hrs/week, full entitlements</option>
                   <option value="PART_TIME">Part-time — fewer hours, pro-rata entitlements</option>
                   <option value="CASUAL">Casual — no guaranteed hours, +25% loading</option>
@@ -156,7 +269,10 @@ export function NewEmployeePage() {
               </div>
               <div className="space-y-1.5">
                 <Label>Pay frequency *</Label>
-                <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" {...register('payFrequency')}>
+                <select
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  {...register('payFrequency')}
+                >
                   <option value="WEEKLY">Weekly</option>
                   <option value="FORTNIGHTLY">Fortnightly</option>
                   <option value="MONTHLY">Monthly</option>
@@ -175,15 +291,21 @@ export function NewEmployeePage() {
                     <Wand2 className="h-3.5 w-3.5 mr-1" /> Use wizard
                   </Button>
                 </div>
-                <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" {...register('awardCode')}>
+                <select
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  {...register('awardCode')}
+                >
                   <option value="">No award / above-award arrangement</option>
-                  <option value="MA000038">MA000038 — Road Transport & Distribution</option>
+                  <option value="MA000038">MA000038 — Road Transport &amp; Distribution</option>
                   <option value="MA000039">MA000039 — Road Transport (Long Distance Operations)</option>
                 </select>
               </div>
               <div className="space-y-1.5">
                 <Label>Classification grade</Label>
-                <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" {...register('classificationLevel')}>
+                <select
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  {...register('classificationLevel')}
+                >
                   <option value="">—</option>
                   <option value="GRADE_1">Grade 1 — Car licence / light vehicle / store person</option>
                   <option value="GRADE_2">Grade 2 — Light rigid (under 8t) / forklift</option>
@@ -201,37 +323,57 @@ export function NewEmployeePage() {
             <CardContent className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label>Pay type *</Label>
-                <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" {...register('payType')}>
+                <select
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  {...register('payType')}
+                >
                   <option value="HOURLY">Hourly</option>
-                  <option value="SALARY">Salary</option>
-                  <option value="KILOMETRE">Per kilometre</option>
-                  <option value="LOAD">Per load</option>
-                  <option value="REVENUE_SHARE">Revenue share</option>
+                  <option value="SALARY">Annual salary</option>
+                  <option value="PER_KM">Per kilometre</option>
+                  <option value="PER_LOAD">Per load</option>
+                  <option value="PERCENTAGE_REVENUE">Revenue share (%)</option>
                 </select>
               </div>
               <div className="space-y-1.5">
-                <Label>Base rate ($) *</Label>
+                <Label>
+                  {watchedPayType === 'SALARY' ? 'Annual salary ($)' :
+                   watchedPayType === 'PERCENTAGE_REVENUE' ? 'Revenue share (%)' :
+                   watchedPayType === 'PER_KM' ? 'Rate per km ($)' :
+                   watchedPayType === 'PER_LOAD' ? 'Rate per load ($)' :
+                   'Hourly rate ($)'} *
+                </Label>
                 <Input type="number" step="0.01" min="0" {...register('baseRate')} />
-                {errors.baseRate && <p className="text-xs text-destructive">{errors.baseRate.message}</p>}
+                {errors.baseRate && (
+                  <p className="text-xs text-destructive">{errors.baseRate.message}</p>
+                )}
+                {awardSuggestion && (
+                  <p className="text-xs text-emerald-600 flex items-center gap-1">
+                    <TrendingUp className="h-3.5 w-3.5 shrink-0" />
+                    {awardSuggestion} — pre-filled
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>
 
-          {/* Tax */}
+          {/* Tax & super */}
           <Card>
             <CardHeader><CardTitle className="text-base">Tax &amp; super</CardTitle></CardHeader>
             <CardContent className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label>Tax residency *</Label>
-                <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" {...register('taxResidencyStatus')}>
+                <select
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  {...register('taxResidencyStatus')}
+                >
                   <option value="RESIDENT">Australian resident</option>
-                  <option value="NON_RESIDENT">Foreign resident</option>
+                  <option value="FOREIGN_RESIDENT">Foreign resident</option>
                   <option value="WORKING_HOLIDAY_MAKER">Working holiday maker</option>
                 </select>
               </div>
               <div className="space-y-1.5">
                 <Label>TFN (stored encrypted)</Label>
-                <Input {...register('tfn')} placeholder="Enter TFN" />
+                <Input {...register('taxFileNumber')} placeholder="Enter TFN" />
               </div>
               <div className="col-span-2 flex gap-6">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -239,7 +381,7 @@ export function NewEmployeePage() {
                   Claims tax-free threshold
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" {...register('hasHECS')} className="rounded" />
+                  <input type="checkbox" {...register('hasHECSDebt')} className="rounded" />
                   Has HECS/HELP debt
                 </label>
               </div>
@@ -271,4 +413,22 @@ export function NewEmployeePage() {
       </div>
     </div>
   )
+}
+
+// ─── Helper: map frontend payType + baseRate → backend pay rate payload ─────
+
+function buildPayRatePayload(
+  payType: string,
+  baseRate: number,
+  effectiveFrom: string,
+): Record<string, unknown> {
+  const base = { effectiveFrom, payType }
+  switch (payType) {
+    case 'HOURLY':             return { ...base, hourlyRate: baseRate }
+    case 'SALARY':             return { ...base, annualSalary: baseRate }
+    case 'PER_KM':             return { ...base, ratePerKm: baseRate }
+    case 'PER_LOAD':           return { ...base, ratePerLoad: baseRate }
+    case 'PERCENTAGE_REVENUE': return { ...base, revenuePercentage: baseRate / 100 }
+    default:                   return { ...base, hourlyRate: baseRate }
+  }
 }
