@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, AlertTriangle, UserCheck, UserX, Send, RotateCcw, XCircle, Clock } from 'lucide-react'
+import { ArrowLeft, AlertTriangle, UserCheck, UserX, Send, RotateCcw, XCircle, Clock, UserMinus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -132,6 +132,10 @@ export function EmployeeDetailPage() {
   const { activeCompanyId } = useAuthStore()
   const [portalPassword, setPortalPassword] = useState('')
   const [generatedPassword, setGeneratedPassword] = useState<string | null>(null)
+  const [showTerminateModal, setShowTerminateModal] = useState(false)
+  const [terminateEndDate, setTerminateEndDate] = useState('')
+  const [terminateReason, setTerminateReason] = useState('')
+  const [terminateError, setTerminateError] = useState('')
 
   const { data: emp, isLoading, isError, error } = useQuery<EmployeeDetail>({
     queryKey: ['employee', id],
@@ -162,6 +166,24 @@ export function EmployeeDetailPage() {
       toast({ title: 'Portal access revoked' })
     },
     onError: err => toast({ title: 'Error', description: apiError(err), variant: 'destructive' }),
+  })
+
+  const terminateMutation = useMutation({
+    mutationFn: () =>
+      api.post(`/employees/${id}/terminate?companyId=${activeCompanyId}`, {
+        endDate: new Date(terminateEndDate).toISOString(),
+        terminationReason: terminateReason || undefined,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employee', id] })
+      queryClient.invalidateQueries({ queryKey: ['employees'] })
+      setShowTerminateModal(false)
+      setTerminateEndDate('')
+      setTerminateReason('')
+      setTerminateError('')
+      toast({ title: 'Employee terminated', description: `${emp?.firstName} ${emp?.lastName} has been marked as inactive.` })
+    },
+    onError: err => setTerminateError(apiError(err)),
   })
 
   if (isLoading) {
@@ -222,6 +244,17 @@ export function EmployeeDetailPage() {
             <Badge variant={emp.isActive ? 'default' : 'secondary'}>
               {emp.isActive ? 'Active' : 'Inactive'}
             </Badge>
+            {emp.isActive && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => setShowTerminateModal(true)}
+              >
+                <UserMinus className="h-4 w-4" />
+                Terminate
+              </Button>
+            )}
             <Button variant="outline" size="sm" asChild>
               <Link to="/employees"><ArrowLeft className="h-4 w-4" />Back</Link>
             </Button>
@@ -603,6 +636,61 @@ export function EmployeeDetailPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* ── Terminate modal ── */}
+      {showTerminateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-lg bg-background p-6 shadow-xl">
+            <h2 className="text-lg font-semibold">Terminate {emp.firstName} {emp.lastName}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              This marks the employee as inactive and records their end date. It does not delete any records.
+            </p>
+
+            <div className="mt-4 space-y-3">
+              <div className="space-y-1.5">
+                <Label>Last day of employment *</Label>
+                <Input
+                  type="date"
+                  value={terminateEndDate}
+                  onChange={e => setTerminateEndDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Reason (optional)</Label>
+                <Input
+                  placeholder="e.g. Resignation, Redundancy, End of contract…"
+                  value={terminateReason}
+                  onChange={e => setTerminateReason(e.target.value)}
+                />
+              </div>
+              {terminateError && (
+                <p className="text-sm text-destructive">{terminateError}</p>
+              )}
+            </div>
+
+            <div className="mt-5 flex justify-end gap-3">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowTerminateModal(false)
+                  setTerminateError('')
+                  setTerminateEndDate('')
+                  setTerminateReason('')
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={!terminateEndDate || terminateMutation.isPending}
+                onClick={() => terminateMutation.mutate()}
+              >
+                {terminateMutation.isPending ? 'Saving…' : 'Terminate employee'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
