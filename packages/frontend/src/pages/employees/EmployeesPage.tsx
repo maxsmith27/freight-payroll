@@ -6,11 +6,30 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { Select } from '@/components/ui/select'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { useAuthStore } from '@/store/auth.store'
 import { api } from '@/lib/api'
-import { formatCurrency, employmentTypeLabel, getInitials, awardLabel } from '@/lib/utils'
+import { formatCurrency, employmentTypeLabel, getInitials } from '@/lib/utils'
+
+// ── Helper: pick the right rate field and suffix for the list view ───────────
+function formatListPayRate(r: {
+  payType: string
+  hourlyRate: string | null
+  annualSalary: string | null
+  ratePerKm: string | null
+  ratePerLoad: string | null
+  revenuePercentage: string | null
+}): string {
+  const n = (v: string | null) => (v != null ? Number(v) : null)
+  switch (r.payType) {
+    case 'HOURLY':             return n(r.hourlyRate)   != null ? `${formatCurrency(n(r.hourlyRate)!)}/hr`   : '—'
+    case 'SALARY':             return n(r.annualSalary) != null ? `${formatCurrency(n(r.annualSalary)!)}/yr` : '—'
+    case 'PER_KM':             return n(r.ratePerKm)    != null ? `${formatCurrency(n(r.ratePerKm)!)}/km`   : '—'
+    case 'PER_LOAD':           return n(r.ratePerLoad)  != null ? `${formatCurrency(n(r.ratePerLoad)!)}/load`: '—'
+    case 'PERCENTAGE_REVENUE': return n(r.revenuePercentage) != null ? `${(n(r.revenuePercentage)! * 100).toFixed(1)}%` : '—'
+    default:                   return '—'
+  }
+}
 
 interface Employee {
   id: string
@@ -21,8 +40,17 @@ interface Employee {
   employmentType: string
   awardCode: string | null
   classificationLevel: string | null
-  depotName: string | null
-  currentPayRate: { baseRate: number; payType: string } | null
+  // Prisma relation — listEmployees includes `depot: { select: { name, code } }`
+  depot: { name: string; code: string } | null
+  // listEmployees includes payRates (current only, take:1). Decimal fields serialised as strings.
+  payRates: Array<{
+    payType: string
+    hourlyRate: string | null
+    annualSalary: string | null
+    ratePerKm: string | null
+    ratePerLoad: string | null
+    revenuePercentage: string | null
+  }>
   isActive: boolean
 }
 
@@ -156,15 +184,12 @@ export function EmployeesPage() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">
-                        {emp.depotName ?? <span className="text-muted-foreground/50">—</span>}
+                        {emp.depot?.name ?? <span className="text-muted-foreground/50">—</span>}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {emp.currentPayRate ? (
+                        {emp.payRates[0] ? (
                           <span>
-                            {formatCurrency(emp.currentPayRate.baseRate)}
-                            <span className="ml-1 text-xs text-muted-foreground">
-                              /{emp.currentPayRate.payType === 'HOURLY' ? 'hr' : emp.currentPayRate.payType.toLowerCase()}
-                            </span>
+                            {formatListPayRate(emp.payRates[0])}
                           </span>
                         ) : (
                           <span className="text-muted-foreground/50">—</span>

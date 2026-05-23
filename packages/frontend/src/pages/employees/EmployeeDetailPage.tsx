@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Edit, AlertTriangle, UserCheck, UserX, Copy, Send, RotateCcw, XCircle, Clock } from 'lucide-react'
+import { ArrowLeft, AlertTriangle, UserCheck, UserX, Send, RotateCcw, XCircle, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -14,6 +14,53 @@ import { formatCurrency, formatDate, employmentTypeLabel, classificationLabel } 
 import { useToast } from '@/hooks/useToast'
 import { useAuthStore } from '@/store/auth.store'
 
+// ─── Types (matching actual Prisma/API field names) ──────────────────────────
+
+interface PayRate {
+  id: string
+  payType: string
+  hourlyRate: string | null
+  ratePerKm: string | null
+  ratePerLoad: string | null
+  revenuePercentage: string | null
+  annualSalary: string | null
+  effectiveFrom: string
+  effectiveTo: string | null
+  notes: string | null
+}
+
+interface LeaveBalance {
+  leaveType: string
+  balance: string   // Prisma Decimal → serialised as string
+  accrued: string
+  used: string
+  pending: string
+}
+
+interface DriverLicence {
+  id: string
+  licenceNumber: string
+  licenceState: string
+  licenceClasses: string[]
+  issueDate: string
+  expiryDate: string
+}
+
+interface Accreditation {
+  id: string
+  accreditationType: string
+  certificateNumber: string | null
+  expiryDate: string | null
+}
+
+interface MedicalCert {
+  id: string
+  certType: string
+  issueDate: string
+  expiryDate: string | null
+  restrictions: string | null
+}
+
 interface EmployeeDetail {
   id: string
   employeeNumber: string
@@ -21,11 +68,12 @@ interface EmployeeDetail {
   lastName: string
   email: string | null
   phone: string | null
+  mobile: string | null
   dateOfBirth: string | null
-  address: string | null
-  suburb: string | null
-  state: string | null
-  postcode: string | null
+  addressStreet: string | null
+  addressSuburb: string | null
+  addressState: string | null
+  addressPostcode: string | null
   employmentType: string
   startDate: string
   endDate: string | null
@@ -34,24 +82,39 @@ interface EmployeeDetail {
   classificationLevel: string | null
   taxResidencyStatus: string
   claimsTaxFreeThreshold: boolean
-  hasHECS: boolean
-  tfn: string | null
+  hasHECSDebt: boolean
+  taxFileNumber: string | null
   superFundName: string | null
   superMemberNumber: string | null
   isActive: boolean
-  depotName: string | null
-  payRates: Array<{ id: string; payType: string; baseRate: number; effectiveFrom: string; effectiveTo: string | null }>
+  depot: { name: string; code: string } | null
+  payRates: PayRate[]
   bankAccounts: Array<{ id: string; accountName: string; bsb: string; accountNumber: string; isPrimary: boolean }>
-  leaveBalances: Array<{ leaveType: string; balanceHours: number; accrualRate: number }>
-  licences: Array<{ licenceClass: string; licenceNumber: string; expiryDate: string; state: string }>
-  accreditations: Array<{ type: string; number: string; expiryDate: string | null }>
-  medicals: Array<{ examDate: string; expiryDate: string | null; restrictions: string | null }>
+  leaveBalances: LeaveBalance[]
+  licences: DriverLicence[]
+  accreditations: Accreditation[]
+  medicalCerts: MedicalCert[]
+  portalUser?: { email: string; isActive: boolean } | null
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function formatPayRate(r: PayRate): string {
+  const n = (v: string | null) => (v ? Number(v) : null)
+  switch (r.payType) {
+    case 'HOURLY':             return n(r.hourlyRate)         != null ? `${formatCurrency(n(r.hourlyRate)!)}/hr`   : '—'
+    case 'SALARY':             return n(r.annualSalary)       != null ? `${formatCurrency(n(r.annualSalary)!)}/yr` : '—'
+    case 'PER_KM':             return n(r.ratePerKm)          != null ? `${formatCurrency(n(r.ratePerKm)!)}/km`   : '—'
+    case 'PER_LOAD':           return n(r.ratePerLoad)        != null ? `${formatCurrency(n(r.ratePerLoad)!)}/load`: '—'
+    case 'PERCENTAGE_REVENUE': return n(r.revenuePercentage)  != null ? `${(n(r.revenuePercentage)! * 100).toFixed(1)}%` : '—'
+    default:                   return '—'
+  }
 }
 
 function LeaveTypeLabel({ type }: { type: string }) {
   const map: Record<string, string> = {
     ANNUAL: 'Annual leave',
-    PERSONAL_CARERS: 'Personal / carer\'s',
+    PERSONAL_CARERS: "Personal / carer's",
     COMPASSIONATE: 'Compassionate',
     LONG_SERVICE: 'Long service leave',
     PARENTAL: 'Parental leave',
@@ -59,6 +122,8 @@ function LeaveTypeLabel({ type }: { type: string }) {
   }
   return <span>{map[type] ?? type}</span>
 }
+
+// ─── Main component ──────────────────────────────────────────────────────────
 
 export function EmployeeDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -68,12 +133,13 @@ export function EmployeeDetailPage() {
   const [portalPassword, setPortalPassword] = useState('')
   const [generatedPassword, setGeneratedPassword] = useState<string | null>(null)
 
-  const { data: emp, isLoading } = useQuery<EmployeeDetail & { portalUser?: { email: string; isActive: boolean } | null }>({
+  const { data: emp, isLoading, isError, error } = useQuery<EmployeeDetail>({
     queryKey: ['employee', id],
     queryFn: async () => {
       const { data } = await api.get(`/employees/${id}?companyId=${activeCompanyId}`)
       return data.data
     },
+    enabled: !!id && !!activeCompanyId,
   })
 
   const grantPortalMutation = useMutation({
@@ -89,8 +155,7 @@ export function EmployeeDetailPage() {
   })
 
   const revokePortalMutation = useMutation({
-    mutationFn: () =>
-      api.delete(`/employees/${id}/portal-access?companyId=${activeCompanyId}`),
+    mutationFn: () => api.delete(`/employees/${id}/portal-access?companyId=${activeCompanyId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['employee', id] })
       setGeneratedPassword(null)
@@ -99,7 +164,7 @@ export function EmployeeDetailPage() {
     onError: err => toast({ title: 'Error', description: apiError(err), variant: 'destructive' }),
   })
 
-  if (isLoading || !emp) {
+  if (isLoading) {
     return (
       <div className="flex flex-col gap-0">
         <PageHeader title="Employee" />
@@ -108,17 +173,36 @@ export function EmployeeDetailPage() {
     )
   }
 
+  if (isError || !emp) {
+    return (
+      <div className="flex flex-col gap-0">
+        <PageHeader
+          title="Employee"
+          actions={
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/employees"><ArrowLeft className="h-4 w-4 mr-1" />Back</Link>
+            </Button>
+          }
+        />
+        <div className="p-6">
+          <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {apiError(error) || 'Employee not found.'}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const fullName = `${emp.firstName} ${emp.lastName}`
+
   const alertsCount = [
     ...emp.licences.filter(l => {
-      const d = new Date(l.expiryDate)
-      const diff = (d.getTime() - Date.now()) / 86400000
+      const diff = (new Date(l.expiryDate).getTime() - Date.now()) / 86400000
       return diff < 90
     }),
     ...emp.accreditations.filter(a => {
       if (!a.expiryDate) return false
-      const diff = (new Date(a.expiryDate).getTime() - Date.now()) / 86400000
-      return diff < 90
+      return (new Date(a.expiryDate).getTime() - Date.now()) / 86400000 < 90
     }),
   ].length
 
@@ -139,10 +223,7 @@ export function EmployeeDetailPage() {
               {emp.isActive ? 'Active' : 'Inactive'}
             </Badge>
             <Button variant="outline" size="sm" asChild>
-              <Link to="/employees">
-                <ArrowLeft className="h-4 w-4" />
-                Back
-              </Link>
+              <Link to="/employees"><ArrowLeft className="h-4 w-4" />Back</Link>
             </Button>
           </div>
         }
@@ -160,18 +241,26 @@ export function EmployeeDetailPage() {
             <TabsTrigger value="onboarding">Onboarding</TabsTrigger>
           </TabsList>
 
-          {/* Details tab */}
+          {/* ── Details ── */}
           <TabsContent value="details" className="space-y-4">
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <Card>
                 <CardHeader><CardTitle className="text-base">Personal</CardTitle></CardHeader>
                 <CardContent className="space-y-3 text-sm">
                   <Row label="Email" value={emp.email} />
-                  <Row label="Phone" value={emp.phone} />
+                  <Row label="Phone" value={emp.phone ?? emp.mobile} />
                   <Row label="Date of birth" value={emp.dateOfBirth ? formatDate(emp.dateOfBirth) : null} />
-                  <Row label="Address" value={[emp.address, emp.suburb, emp.state, emp.postcode].filter(Boolean).join(', ') || null} />
+                  <Row
+                    label="Address"
+                    value={
+                      [emp.addressStreet, emp.addressSuburb, emp.addressState, emp.addressPostcode]
+                        .filter(Boolean)
+                        .join(', ') || null
+                    }
+                  />
                 </CardContent>
               </Card>
+
               <Card>
                 <CardHeader><CardTitle className="text-base">Employment</CardTitle></CardHeader>
                 <CardContent className="space-y-3 text-sm">
@@ -179,19 +268,26 @@ export function EmployeeDetailPage() {
                   <Row label="Start date" value={formatDate(emp.startDate)} />
                   {emp.endDate && <Row label="End date" value={formatDate(emp.endDate)} />}
                   <Row label="Pay frequency" value={emp.payFrequency} />
-                  <Row label="Depot" value={emp.depotName} />
-                  {emp.awardCode && <Row label="Award" value={`${emp.awardCode} — ${classificationLabel(emp.classificationLevel ?? '')}`} />}
+                  <Row label="Depot" value={emp.depot?.name ?? null} />
+                  {emp.awardCode && (
+                    <Row
+                      label="Award"
+                      value={`${emp.awardCode} — ${classificationLabel(emp.classificationLevel ?? '')}`}
+                    />
+                  )}
                 </CardContent>
               </Card>
+
               <Card>
                 <CardHeader><CardTitle className="text-base">Tax</CardTitle></CardHeader>
                 <CardContent className="space-y-3 text-sm">
-                  <Row label="TFN" value={emp.tfn ? '••• ••• •••' : 'Not provided'} />
+                  <Row label="TFN" value={emp.taxFileNumber ? '••• ••• •••' : 'Not provided'} />
                   <Row label="Residency" value={emp.taxResidencyStatus} />
                   <Row label="Tax-free threshold" value={emp.claimsTaxFreeThreshold ? 'Yes' : 'No'} />
-                  <Row label="HECS/HELP" value={emp.hasHECS ? 'Yes' : 'No'} />
+                  <Row label="HECS/HELP" value={emp.hasHECSDebt ? 'Yes' : 'No'} />
                 </CardContent>
               </Card>
+
               <Card>
                 <CardHeader><CardTitle className="text-base">Superannuation</CardTitle></CardHeader>
                 <CardContent className="space-y-3 text-sm">
@@ -203,12 +299,10 @@ export function EmployeeDetailPage() {
             </div>
           </TabsContent>
 
-          {/* Pay rates tab */}
+          {/* ── Pay rates ── */}
           <TabsContent value="pay">
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Pay rate history</CardTitle>
-              </CardHeader>
+              <CardHeader><CardTitle className="text-base">Pay rate history</CardTitle></CardHeader>
               <CardContent className="p-0">
                 {emp.payRates.length === 0 ? (
                   <div className="p-6 text-sm text-muted-foreground">No pay rates recorded.</div>
@@ -226,7 +320,7 @@ export function EmployeeDetailPage() {
                       {emp.payRates.map(r => (
                         <tr key={r.id} className="border-b last:border-0">
                           <td className="px-4 py-3">{r.payType}</td>
-                          <td className="px-4 py-3 text-right font-medium">{formatCurrency(r.baseRate)}</td>
+                          <td className="px-4 py-3 text-right font-medium">{formatPayRate(r)}</td>
                           <td className="px-4 py-3 text-muted-foreground">{formatDate(r.effectiveFrom)}</td>
                           <td className="px-4 py-3 text-muted-foreground">
                             {r.effectiveTo ? formatDate(r.effectiveTo) : <Badge variant="secondary">Current</Badge>}
@@ -240,7 +334,7 @@ export function EmployeeDetailPage() {
             </Card>
           </TabsContent>
 
-          {/* Leave tab */}
+          {/* ── Leave ── */}
           <TabsContent value="leave">
             <Card>
               <CardHeader><CardTitle className="text-base">Leave balances</CardTitle></CardHeader>
@@ -252,16 +346,28 @@ export function EmployeeDetailPage() {
                     <thead>
                       <tr className="border-b bg-muted/40">
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Leave type</th>
-                        <th className="px-4 py-3 text-right font-medium text-muted-foreground">Balance (hours)</th>
-                        <th className="px-4 py-3 text-right font-medium text-muted-foreground">Accrual rate</th>
+                        <th className="px-4 py-3 text-right font-medium text-muted-foreground">Balance (hrs)</th>
+                        <th className="px-4 py-3 text-right font-medium text-muted-foreground">Accrued (hrs)</th>
+                        <th className="px-4 py-3 text-right font-medium text-muted-foreground">Used (hrs)</th>
+                        <th className="px-4 py-3 text-right font-medium text-muted-foreground">Pending (hrs)</th>
                       </tr>
                     </thead>
                     <tbody>
                       {emp.leaveBalances.map((lb, i) => (
                         <tr key={i} className="border-b last:border-0">
                           <td className="px-4 py-3"><LeaveTypeLabel type={lb.leaveType} /></td>
-                          <td className="px-4 py-3 text-right font-medium">{lb.balanceHours.toFixed(2)}</td>
-                          <td className="px-4 py-3 text-right text-muted-foreground">{lb.accrualRate.toFixed(4)} hrs/hr</td>
+                          <td className="px-4 py-3 text-right font-medium">
+                            {Number(lb.balance).toFixed(2)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-muted-foreground">
+                            {Number(lb.accrued).toFixed(2)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-muted-foreground">
+                            {Number(lb.used).toFixed(2)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-muted-foreground">
+                            {Number(lb.pending).toFixed(2)}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -271,7 +377,7 @@ export function EmployeeDetailPage() {
             </Card>
           </TabsContent>
 
-          {/* Compliance tab */}
+          {/* ── Compliance ── */}
           <TabsContent value="compliance" className="space-y-4">
             <Card>
               <CardHeader><CardTitle className="text-base">Driver licences</CardTitle></CardHeader>
@@ -282,20 +388,20 @@ export function EmployeeDetailPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/40">
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Class</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Class(es)</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Number</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">State</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Expiry</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {emp.licences.map((l, i) => {
+                      {emp.licences.map(l => {
                         const daysLeft = Math.ceil((new Date(l.expiryDate).getTime() - Date.now()) / 86400000)
                         return (
-                          <tr key={i} className="border-b last:border-0">
-                            <td className="px-4 py-3 font-medium">{l.licenceClass}</td>
+                          <tr key={l.id} className="border-b last:border-0">
+                            <td className="px-4 py-3 font-medium">{l.licenceClasses.join(', ')}</td>
                             <td className="px-4 py-3 text-muted-foreground">{l.licenceNumber}</td>
-                            <td className="px-4 py-3 text-muted-foreground">{l.state}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{l.licenceState}</td>
                             <td className="px-4 py-3">
                               <span className={daysLeft < 30 ? 'text-destructive font-medium' : daysLeft < 90 ? 'text-orange-600' : ''}>
                                 {formatDate(l.expiryDate)}
@@ -316,24 +422,58 @@ export function EmployeeDetailPage() {
             </Card>
 
             <Card>
+              <CardHeader><CardTitle className="text-base">Accreditations</CardTitle></CardHeader>
+              <CardContent className="p-0">
+                {emp.accreditations.length === 0 ? (
+                  <div className="p-6 text-sm text-muted-foreground">No accreditations recorded.</div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40">
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Type</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Certificate #</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Expiry</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {emp.accreditations.map(a => (
+                        <tr key={a.id} className="border-b last:border-0">
+                          <td className="px-4 py-3">{a.accreditationType}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{a.certificateNumber ?? '—'}</td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {a.expiryDate ? formatDate(a.expiryDate) : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
               <CardHeader><CardTitle className="text-base">Medical certificates</CardTitle></CardHeader>
               <CardContent className="p-0">
-                {emp.medicals.length === 0 ? (
+                {emp.medicalCerts.length === 0 ? (
                   <div className="p-6 text-sm text-muted-foreground">No medicals recorded.</div>
                 ) : (
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/40">
-                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Exam date</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Type</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Issue date</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Expiry</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Restrictions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {emp.medicals.map((m, i) => (
-                        <tr key={i} className="border-b last:border-0">
-                          <td className="px-4 py-3">{formatDate(m.examDate)}</td>
-                          <td className="px-4 py-3">{m.expiryDate ? formatDate(m.expiryDate) : '—'}</td>
+                      {emp.medicalCerts.map(m => (
+                        <tr key={m.id} className="border-b last:border-0">
+                          <td className="px-4 py-3">{m.certType}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{formatDate(m.issueDate)}</td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {m.expiryDate ? formatDate(m.expiryDate) : '—'}
+                          </td>
                           <td className="px-4 py-3 text-muted-foreground">{m.restrictions ?? 'None'}</td>
                         </tr>
                       ))}
@@ -344,7 +484,7 @@ export function EmployeeDetailPage() {
             </Card>
           </TabsContent>
 
-          {/* Banking tab */}
+          {/* ── Banking ── */}
           <TabsContent value="bank">
             <Card>
               <CardHeader><CardTitle className="text-base">Bank accounts</CardTitle></CardHeader>
@@ -394,7 +534,7 @@ export function EmployeeDetailPage() {
                     </div>
                     <Row label="Login email" value={emp.portalUser.email} />
                     <p className="text-xs text-muted-foreground">
-                      The employee logs in at <strong>/login</strong> and is redirected to the Employee Portal. Share their login email and temporary password directly.
+                      The employee logs in at <strong>/login</strong> and is redirected to the Employee Portal.
                     </p>
                     <Button
                       variant="destructive"
@@ -409,7 +549,8 @@ export function EmployeeDetailPage() {
                 ) : (
                   <div className="space-y-3">
                     <p className="text-sm text-muted-foreground">
-                      Grant this employee access to the self-service portal so they can log timesheets, kilometres, and view payslips.
+                      Grant this employee access to the self-service portal so they can log timesheets,
+                      kilometres, and view payslips.
                     </p>
                     {emp.email ? (
                       <Row label="Login email will be" value={emp.email} />
@@ -436,13 +577,10 @@ export function EmployeeDetailPage() {
                       <UserCheck className="h-4 w-4 mr-1" />
                       Grant portal access
                     </Button>
-
                     {generatedPassword && (
                       <div className="rounded bg-green-50 border border-green-200 p-3 text-sm space-y-1">
                         <p className="font-medium text-green-800">Access granted!</p>
-                        <p className="text-green-700">
-                          Share these credentials with <strong>{emp.firstName}</strong>:
-                        </p>
+                        <p className="text-green-700">Share these credentials with <strong>{emp.firstName}</strong>:</p>
                         <p className="text-green-700">Email: <strong>{emp.email}</strong></p>
                         <p className="text-green-700">Password: <strong>{generatedPassword}</strong></p>
                         <p className="text-xs text-green-600">They should change their password after first login.</p>
@@ -456,13 +594,19 @@ export function EmployeeDetailPage() {
 
           {/* ── Onboarding ── */}
           <TabsContent value="onboarding">
-            <OnboardingPanel employeeId={emp.id} employeeEmail={emp.email} employeeFirstName={emp.firstName} />
+            <OnboardingPanel
+              employeeId={emp.id}
+              employeeEmail={emp.email}
+              employeeFirstName={emp.firstName}
+            />
           </TabsContent>
         </Tabs>
       </div>
     </div>
   )
 }
+
+// ─── Row helper ──────────────────────────────────────────────────────────────
 
 function Row({ label, value }: { label: string; value: string | null | undefined }) {
   return (
@@ -481,7 +625,6 @@ interface OnboardingRecord {
   status: string
   expiresAt: string
   createdAt: string
-  hasSubmitted: boolean
   data: Record<string, unknown> | null
 }
 
@@ -514,7 +657,6 @@ function OnboardingPanel({
   const { activeCompanyId } = useAuthStore()
   const { toast } = useToast()
   const [inviteEmail, setInviteEmail] = useState(employeeEmail ?? '')
-  const [inviteMessage, setInviteMessage] = useState('')
   const [formError, setFormError] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
@@ -522,11 +664,10 @@ function OnboardingPanel({
     queryKey: ['onboarding', 'pending', activeCompanyId],
     queryFn: () =>
       api.get(`/onboarding/pending?companyId=${activeCompanyId}`).then(r => r.data.data),
-    // Filter to ones for this employee email
   })
 
-  const relevantOnboardings = (onboardings ?? []).filter(o =>
-    o.inviteEmail === (employeeEmail ?? '').toLowerCase()
+  const relevantOnboardings = (onboardings ?? []).filter(
+    o => o.inviteEmail === (employeeEmail ?? '').toLowerCase(),
   )
 
   const sendInviteMutation = useMutation({
@@ -535,7 +676,6 @@ function OnboardingPanel({
         firstName: employeeFirstName,
         lastName: '',
         email: inviteEmail,
-        message: inviteMessage || undefined,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['onboarding', 'pending', activeCompanyId] })
@@ -546,8 +686,7 @@ function OnboardingPanel({
   })
 
   const resendMutation = useMutation({
-    mutationFn: (id: string) =>
-      api.post(`/onboarding/${id}/resend?companyId=${activeCompanyId}`),
+    mutationFn: (id: string) => api.post(`/onboarding/${id}/resend?companyId=${activeCompanyId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['onboarding', 'pending', activeCompanyId] })
       toast({ title: 'Invite resent' })
@@ -556,8 +695,7 @@ function OnboardingPanel({
   })
 
   const activateMutation = useMutation({
-    mutationFn: (id: string) =>
-      api.post(`/onboarding/${id}/activate?companyId=${activeCompanyId}`),
+    mutationFn: (id: string) => api.post(`/onboarding/${id}/activate?companyId=${activeCompanyId}`),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['onboarding', 'pending', activeCompanyId] })
       queryClient.invalidateQueries({ queryKey: ['employee', employeeId] })
@@ -567,8 +705,7 @@ function OnboardingPanel({
   })
 
   const cancelMutation = useMutation({
-    mutationFn: (id: string) =>
-      api.delete(`/onboarding/${id}?companyId=${activeCompanyId}`),
+    mutationFn: (id: string) => api.delete(`/onboarding/${id}?companyId=${activeCompanyId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['onboarding', 'pending', activeCompanyId] })
       toast({ title: 'Invite cancelled' })
@@ -577,7 +714,7 @@ function OnboardingPanel({
   })
 
   const hasActiveInvite = relevantOnboardings.some(o =>
-    ['INVITED', 'IN_PROGRESS', 'PENDING_REVIEW'].includes(o.status)
+    ['INVITED', 'IN_PROGRESS', 'PENDING_REVIEW'].includes(o.status),
   )
 
   return (
@@ -588,10 +725,10 @@ function OnboardingPanel({
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Send {employeeFirstName} an invite link so they can complete their own details: TFN declaration, super choice, bank account, and personal information.
+            Send {employeeFirstName} an invite link so they can complete their own details: TFN
+            declaration, super choice, bank account, and personal information.
           </p>
 
-          {/* Active / past invites */}
           {isLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : relevantOnboardings.length > 0 ? (
@@ -608,7 +745,8 @@ function OnboardingPanel({
                       </div>
                       <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        Sent {new Date(record.createdAt).toLocaleDateString('en-AU')} · Expires {new Date(record.expiresAt).toLocaleDateString('en-AU')}
+                        Sent {new Date(record.createdAt).toLocaleDateString('en-AU')} · Expires{' '}
+                        {new Date(record.expiresAt).toLocaleDateString('en-AU')}
                       </p>
                     </div>
                     <div className="flex gap-1.5">
@@ -645,7 +783,6 @@ function OnboardingPanel({
                     </div>
                   </div>
 
-                  {/* Show submitted data for pending review */}
                   {record.status === 'PENDING_REVIEW' && record.data && (
                     <>
                       <button
@@ -666,12 +803,14 @@ function OnboardingPanel({
                             ['TFN provided', record.data.taxFileNumber ? 'Yes' : 'No'],
                             ['Super fund', record.data.useDefaultFund ? 'Default' : (record.data.superFundName as string)],
                             ['Bank BSB', record.data.bankBsb as string],
-                          ].filter(([, v]) => v).map(([label, value]) => (
-                            <div key={label as string} className="flex gap-3">
-                              <span className="text-muted-foreground w-28 shrink-0">{label}</span>
-                              <span className="font-medium">{value as string}</span>
-                            </div>
-                          ))}
+                          ]
+                            .filter(([, v]) => v)
+                            .map(([label, value]) => (
+                              <div key={label as string} className="flex gap-3">
+                                <span className="text-muted-foreground w-28 shrink-0">{label}</span>
+                                <span className="font-medium">{value as string}</span>
+                              </div>
+                            ))}
                         </div>
                       )}
                     </>
@@ -681,7 +820,6 @@ function OnboardingPanel({
             </div>
           ) : null}
 
-          {/* Send invite form */}
           {!hasActiveInvite && (
             <div className="space-y-3 pt-2 border-t">
               <p className="text-sm font-medium">Send onboarding invite</p>
