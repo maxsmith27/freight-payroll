@@ -598,6 +598,7 @@ export function EmployeeDetailPage() {
               employeeId={emp.id}
               employeeEmail={emp.email}
               employeeFirstName={emp.firstName}
+              employeeLastName={emp.lastName}
             />
           </TabsContent>
         </Tabs>
@@ -648,10 +649,12 @@ function OnboardingPanel({
   employeeId,
   employeeEmail,
   employeeFirstName,
+  employeeLastName,
 }: {
   employeeId: string
   employeeEmail: string | null
   employeeFirstName: string
+  employeeLastName: string
 }) {
   const queryClient = useQueryClient()
   const { activeCompanyId } = useAuthStore()
@@ -674,7 +677,7 @@ function OnboardingPanel({
     mutationFn: () =>
       api.post(`/onboarding/invite?companyId=${activeCompanyId}`, {
         firstName: employeeFirstName,
-        lastName: '',
+        lastName: employeeLastName,
         email: inviteEmail,
       }),
     onSuccess: () => {
