@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Loader2, Building2, Users, Lock, ChevronDown, ChevronUp, ShieldCheck, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
+import { Loader2, Building2, Users, Lock, ChevronDown, ChevronUp, ShieldCheck, CheckCircle2, XCircle, AlertCircle, ClipboardList, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -340,8 +340,264 @@ function RateVerificationPanel() {
   )
 }
 
+// ─── Audit Log ──────────────────────────────────────────────────────────────
+
+const ACTION_LABELS: Record<string, string> = {
+  CREATE:                 'Created',
+  UPDATE:                 'Updated',
+  DELETE:                 'Deleted',
+  LOGIN:                  'Logged in',
+  LOGOUT:                 'Logged out',
+  PAY_RUN_CREATED:        'Pay run created',
+  PAY_RUN_FINALISED:      'Pay run finalised',
+  PAY_RUN_CANCELLED:      'Pay run cancelled',
+  LEAVE_APPROVED:         'Leave approved',
+  LEAVE_DECLINED:         'Leave declined',
+  TIMESHEET_APPROVED:     'Timesheet approved',
+  ROSTER_PUBLISHED:       'Roster published',
+  EXPORT_GENERATED:       'Export generated',
+  PORTAL_ACCESS_GRANTED:  'Portal access granted',
+  PORTAL_ACCESS_REVOKED:  'Portal access revoked',
+}
+
+const ACTION_VARIANTS: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
+  CREATE:                'default',
+  UPDATE:                'secondary',
+  DELETE:                'destructive',
+  PAY_RUN_CREATED:       'default',
+  PAY_RUN_FINALISED:     'default',
+  PAY_RUN_CANCELLED:     'destructive',
+  LEAVE_APPROVED:        'default',
+  LEAVE_DECLINED:        'destructive',
+  TIMESHEET_APPROVED:    'default',
+  PORTAL_ACCESS_GRANTED: 'default',
+  PORTAL_ACCESS_REVOKED: 'destructive',
+}
+
+interface AuditEntry {
+  id: string
+  createdAt: string
+  action: string
+  entityType: string
+  entityId: string
+  newValues: unknown
+  previousValues: unknown
+  userId: string | null
+  userName: string | null
+  userEmail: string | null
+  employeeId: string | null
+  employeeName: string | null
+}
+
+interface AuditPage {
+  data: AuditEntry[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
+
+function AuditLogPanel({ companyId }: { companyId: string }) {
+  const [page, setPage]             = useState(1)
+  const [action, setAction]         = useState('')
+  const [from, setFrom]             = useState('')
+  const [to, setTo]                 = useState('')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+
+  const params = new URLSearchParams({
+    companyId,
+    page: String(page),
+    pageSize: '50',
+    ...(action ? { action } : {}),
+    ...(from   ? { from }   : {}),
+    ...(to     ? { to }     : {}),
+  })
+
+  const { data, isLoading } = useQuery<AuditPage>({
+    queryKey: ['audit-logs', companyId, page, action, from, to],
+    queryFn: async () => {
+      const r = await api.get(`/admin/audit-logs?${params}`)
+      return r.data
+    },
+    placeholderData: prev => prev,
+  })
+
+  function applyFilters() {
+    setPage(1)
+  }
+
+  function clearFilters() {
+    setAction('')
+    setFrom('')
+    setTo('')
+    setPage(1)
+  }
+
+  return (
+    <div className="space-y-4 max-w-5xl">
+      <div>
+        <h2 className="text-sm font-semibold">Audit log</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          A full record of every action taken in the system — who did it, when, and what changed.
+          Visible to Company Admins and Payroll Managers only.
+        </p>
+      </div>
+
+      {/* Filters */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Action type</Label>
+              <select
+                className="flex h-9 rounded-md border border-input bg-background px-3 text-sm w-52"
+                value={action}
+                onChange={e => setAction(e.target.value)}
+              >
+                <option value="">All actions</option>
+                {Object.entries(ACTION_LABELS).map(([val, label]) => (
+                  <option key={val} value={val}>{label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">From</Label>
+              <Input type="date" className="h-9 w-40 text-sm" value={from} onChange={e => setFrom(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">To</Label>
+              <Input type="date" className="h-9 w-40 text-sm" value={to} onChange={e => setTo(e.target.value)} />
+            </div>
+            <Button size="sm" onClick={applyFilters}>Apply</Button>
+            {(action || from || to) && (
+              <Button size="sm" variant="ghost" onClick={clearFilters}>Clear</Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Table */}
+      <Card>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="p-12 flex justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : !data || data.data.length === 0 ? (
+            <div className="p-12 text-center text-sm text-muted-foreground">
+              No audit log entries found.
+            </div>
+          ) : (
+            <div className="divide-y">
+              {/* Header */}
+              <div className="grid grid-cols-[160px_1fr_140px_140px_32px] gap-3 px-4 py-2 bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                <span>Date / Time</span>
+                <span>Action</span>
+                <span>User</span>
+                <span>Employee</span>
+                <span />
+              </div>
+
+              {data.data.map(entry => (
+                <div key={entry.id}>
+                  <button
+                    className="grid grid-cols-[160px_1fr_140px_140px_32px] gap-3 px-4 py-3 w-full text-left hover:bg-muted/30 transition-colors items-center"
+                    onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
+                  >
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {new Date(entry.createdAt).toLocaleString('en-AU', {
+                        day: '2-digit', month: 'short', year: 'numeric',
+                        hour: '2-digit', minute: '2-digit',
+                      })}
+                    </span>
+
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Badge
+                        variant={ACTION_VARIANTS[entry.action] ?? 'outline'}
+                        className="text-xs shrink-0"
+                      >
+                        {ACTION_LABELS[entry.action] ?? entry.action}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground truncate">
+                        {entry.entityType}
+                      </span>
+                    </div>
+
+                    <span className="text-xs truncate">
+                      {entry.userName ?? <span className="text-muted-foreground">System</span>}
+                    </span>
+
+                    <span className="text-xs truncate text-muted-foreground">
+                      {entry.employeeName ?? '—'}
+                    </span>
+
+                    <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${expandedId === entry.id ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {expandedId === entry.id && (
+                    <div className="px-4 pb-4 bg-muted/20 space-y-2">
+                      <div className="grid grid-cols-2 gap-4 text-xs pt-1">
+                        {entry.userEmail && (
+                          <div>
+                            <span className="text-muted-foreground">User email: </span>
+                            <span>{entry.userEmail}</span>
+                          </div>
+                        )}
+                        <div>
+                          <span className="text-muted-foreground">Entity ID: </span>
+                          <span className="font-mono">{entry.entityId}</span>
+                        </div>
+                      </div>
+                      {entry.newValues && (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-1">Details</p>
+                          <pre className="text-xs bg-background border rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">
+                            {JSON.stringify(entry.newValues, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      {entry.previousValues && (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-1">Previous values</p>
+                          <pre className="text-xs bg-background border rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">
+                            {JSON.stringify(entry.previousValues, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Pagination */}
+      {data && data.totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground text-xs">
+            {((page - 1) * 50) + 1}–{Math.min(page * 50, data.total)} of {data.total.toLocaleString()} entries
+          </span>
+          <div className="flex items-center gap-1">
+            <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="px-3 text-xs">Page {page} of {data.totalPages}</span>
+            <Button size="sm" variant="outline" disabled={page >= data.totalPages} onClick={() => setPage(p => p + 1)}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function SettingsPage() {
   const { activeCompanyId, user } = useAuthStore()
+  const activeRole = user?.companyAccess.find(a => a.companyId === activeCompanyId)?.role ?? null
+  const isAdmin = activeRole === 'COMPANY_ADMIN' || activeRole === 'PAYROLL_MANAGER'
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -433,6 +689,12 @@ export function SettingsPage() {
               <ShieldCheck className="h-4 w-4 mr-2" />
               Rate Verification
             </TabsTrigger>
+            {isAdmin && (
+              <TabsTrigger value="audit">
+                <ClipboardList className="h-4 w-4 mr-2" />
+                Audit Log
+              </TabsTrigger>
+            )}
           </TabsList>
 
           {/* Company settings */}
@@ -595,6 +857,13 @@ export function SettingsPage() {
           <TabsContent value="rates">
             <RateVerificationPanel />
           </TabsContent>
+
+          {/* Audit Log tab — admin only */}
+          {isAdmin && (
+            <TabsContent value="audit">
+              <AuditLogPanel companyId={activeCompanyId ?? ''} />
+            </TabsContent>
+          )}
         </Tabs>
       </div>
     </div>

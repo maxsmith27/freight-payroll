@@ -26,6 +26,7 @@ import { complianceRouter } from './modules/compliance/compliance.router.js'
 import { reportsRouter } from './modules/reports/reports.router.js'
 import { selfServiceRouter } from './modules/selfService/selfService.router.js'
 import { ratesRouter } from './modules/admin/rates.router.js'
+import { auditRouter } from './modules/admin/audit.router.js'
 
 const app = express()
 
@@ -85,6 +86,7 @@ app.use('/api/v1/compliance', requestAuditLogger, complianceRouter)
 app.use('/api/v1/reports', reportsRouter)
 app.use('/api/v1/self-service', selfServiceRouter)
 app.use('/api/v1/admin/rates', ratesRouter)
+app.use('/api/v1/admin/audit-logs', auditRouter)
 
 // ─── Local file serving (dev only) ──────────────────────────────────────────
 // In production, files are served via S3 pre-signed URLs; this route is never reached.
