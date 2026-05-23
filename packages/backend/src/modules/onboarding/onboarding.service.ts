@@ -94,11 +94,12 @@ export async function sendInvite(
   })
   if (existing) throw new AppError(409, 'An active onboarding invite already exists for this email address')
 
-  // Check if employee with this email already exists
+  // If an employee with this email was manually created, pre-link them so
+  // activateOnboarding updates their record instead of creating a duplicate.
   const existingEmp = await prisma.employee.findFirst({
     where: { companyId, email: data.email.toLowerCase(), deletedAt: null },
+    select: { id: true },
   })
-  if (existingEmp) throw new AppError(409, 'An employee with this email already exists')
 
   const token = crypto.randomBytes(32).toString('hex')
   const expiresAt = new Date()
@@ -112,6 +113,8 @@ export async function sendInvite(
       expiresAt,
       status: 'INVITED',
       invitedBy,
+      // Pre-link existing employee — activateOnboarding will update, not create
+      employeeId: existingEmp?.id ?? undefined,
       onboardingData: {
         firstName: data.firstName,
         lastName: data.lastName,
@@ -267,124 +270,149 @@ export async function activateOnboarding(
 
   const d = (record.onboardingData ?? {}) as Record<string, unknown>
 
-  // Generate a unique employee number
-  const last = await prisma.employee.findFirst({
-    where: { companyId },
-    orderBy: { employeeNumber: 'desc' },
-    select: { employeeNumber: true },
-  })
-  const nextNum = last?.employeeNumber
-    ? String(parseInt(last.employeeNumber.replace(/\D/g, '') || '0', 10) + 1).padStart(4, '0')
-    : '0001'
+  // ── Shared helpers ──────────────────────────────────────────────────────────
 
-  // Create employee record within a transaction
+  // Fields collected from the employee's self-service form
+  const selfServiceFields = {
+    preferredName:          (d.preferredName as string | undefined)       || undefined,
+    phone:                  (d.phone as string | undefined)                || undefined,
+    mobile:                 (d.mobile as string | undefined)               || undefined,
+    dateOfBirth:            d.dateOfBirth ? new Date(d.dateOfBirth as string) : undefined,
+    gender:                 (d.gender as string | undefined)               || undefined,
+    addressStreet:          (d.addressStreet as string | undefined)        || undefined,
+    addressSuburb:          (d.addressSuburb as string | undefined)        || undefined,
+    addressState:           (d.addressState as any)                        || undefined,
+    addressPostcode:        (d.addressPostcode as string | undefined)      || undefined,
+    stateOfEmployment:      (d.stateOfEmployment as any)                   || undefined,
+    taxFileNumber:          d.taxFileNumber ? encryptOptional(d.taxFileNumber as string) : undefined,
+    taxResidencyStatus:     (d.taxResidencyStatus as any)                  || undefined,
+    claimsTaxFreeThreshold: d.claimsTaxFreeThreshold !== undefined ? (d.claimsTaxFreeThreshold as boolean) : undefined,
+    hasHECSDebt:            d.hasHECSDebt !== undefined ? (d.hasHECSDebt as boolean) : undefined,
+    hasSFSSDebt:            d.hasSFSSDebt !== undefined ? (d.hasSFSSDebt as boolean) : undefined,
+    taxDeclarationDate:     d.taxDeclarationAgreed ? new Date() : undefined,
+    superFundName:          (d.superFundName as string | undefined)        || undefined,
+    superFundAbn:           (d.superFundAbn as string | undefined)         || undefined,
+    superFundUsi:           (d.superFundUsi as string | undefined)         || undefined,
+    superMemberNumber:      (d.superMemberNumber as string | undefined)    || undefined,
+  }
+
+  // ── Determine path: update existing employee, or create new ────────────────
+
   const { employee, user } = await prisma.$transaction(async tx => {
-    const employee = await tx.employee.create({
-      data: {
-        companyId,
-        employeeNumber: nextNum,
-        firstName: (d.firstName as string) ?? record.inviteEmail.split('@')[0],
-        lastName: (d.lastName as string) ?? '',
-        preferredName: (d.preferredName as string | undefined) || undefined,
-        email: record.inviteEmail,
-        phone: (d.phone as string | undefined) || undefined,
-        mobile: (d.mobile as string | undefined) || undefined,
-        dateOfBirth: d.dateOfBirth ? new Date(d.dateOfBirth as string) : undefined,
-        gender: (d.gender as string | undefined) || undefined,
-        addressStreet: (d.addressStreet as string | undefined) || undefined,
-        addressSuburb: (d.addressSuburb as string | undefined) || undefined,
-        addressState: (d.addressState as any) || undefined,
-        addressPostcode: (d.addressPostcode as string | undefined) || undefined,
-        stateOfEmployment: (d.stateOfEmployment as any) || undefined,
-        taxFileNumber: d.taxFileNumber ? encryptOptional(d.taxFileNumber as string) : undefined,
-        taxResidencyStatus: ((d.taxResidencyStatus as any) || 'RESIDENT') as any,
-        claimsTaxFreeThreshold: (d.claimsTaxFreeThreshold as boolean) ?? true,
-        hasHECSDebt: (d.hasHECSDebt as boolean) ?? false,
-        hasSFSSDebt: (d.hasSFSSDebt as boolean) ?? false,
-        taxDeclarationDate: d.taxDeclarationAgreed ? new Date() : undefined,
-        superFundName: (d.superFundName as string | undefined) || undefined,
-        superFundAbn: (d.superFundAbn as string | undefined) || undefined,
-        superFundUsi: (d.superFundUsi as string | undefined) || undefined,
-        superMemberNumber: (d.superMemberNumber as string | undefined) || undefined,
-        employmentType: ((d.employmentType as any) || 'FULL_TIME') as any,
-        startDate: d.startDate ? new Date(d.startDate as string) : new Date(),
-        awardCode: (d.awardCode as any) || undefined,
-        depotId: (d.depotId as string | undefined) || undefined,
-        payFrequency: 'WEEKLY' as const,
-        isActive: true,
-      },
-    })
+    let employee: { id: string; employeeNumber: string }
 
-    // Initialise leave balances
-    await tx.leaveBalance.createMany({
-      data: ['ANNUAL', 'PERSONAL_CARERS', 'COMPASSIONATE', 'LONG_SERVICE'].map(lt => ({
-        employeeId: employee.id,
-        leaveType: lt as any,
-        accrued: 0,
-        used: 0,
-        pending: 0,
-        balance: 0,
-      })),
-      skipDuplicates: true,
-    })
+    if (record.employeeId) {
+      // ── PATH A: employee was manually created before onboarding — update them ─
+      employee = await tx.employee.update({
+        where: { id: record.employeeId },
+        data: {
+          ...selfServiceFields,
+          // Overwrite name if the employee filled it in
+          ...(d.firstName ? { firstName: d.firstName as string } : {}),
+          ...(d.lastName  ? { lastName:  d.lastName  as string } : {}),
+        },
+        select: { id: true, employeeNumber: true },
+      })
+    } else {
+      // ── PATH B: brand-new employee created from onboarding ────────────────
+      const last = await tx.employee.findFirst({
+        where: { companyId },
+        orderBy: { employeeNumber: 'desc' },
+        select: { employeeNumber: true },
+      })
+      const nextNum = last?.employeeNumber
+        ? String(parseInt(last.employeeNumber.replace(/\D/g, '') || '0', 10) + 1).padStart(4, '0')
+        : '0001'
 
-    // Add bank account if provided
+      employee = await tx.employee.create({
+        data: {
+          companyId,
+          employeeNumber: nextNum,
+          email: record.inviteEmail,
+          firstName: (d.firstName as string) ?? record.inviteEmail.split('@')[0],
+          lastName:  (d.lastName  as string) ?? '',
+          employmentType: ((d.employmentType as any) || 'FULL_TIME') as any,
+          startDate:      d.startDate ? new Date(d.startDate as string) : new Date(),
+          awardCode:      (d.awardCode as any)                        || undefined,
+          depotId:        (d.depotId   as string | undefined)          || undefined,
+          payFrequency:   'WEEKLY',
+          isActive:       true,
+          ...selfServiceFields,
+        },
+        select: { id: true, employeeNumber: true },
+      })
+
+      // Initialise leave balances for new employee only
+      await tx.leaveBalance.createMany({
+        data: ['ANNUAL', 'PERSONAL_CARERS', 'COMPASSIONATE', 'LONG_SERVICE'].map(lt => ({
+          employeeId: employee.id,
+          leaveType: lt as any,
+          accrued: 0, used: 0, pending: 0, balance: 0,
+        })),
+        skipDuplicates: true,
+      })
+    }
+
+    // ── Bank account (add if provided and no primary account yet) ────────────
     if (d.bankBsb && d.bankAccountNumber && d.bankAccountName) {
-      await tx.bankAccount.create({
-        data: {
-          employeeId: employee.id,
-          bsb: encrypt(d.bankBsb as string),
-          accountNumber: encrypt(d.bankAccountNumber as string),
-          accountName: d.bankAccountName as string,
-          isPrimary: true,
-        },
-      })
+      const hasPrimary = await tx.bankAccount.findFirst({ where: { employeeId: employee.id, isPrimary: true } })
+      if (!hasPrimary) {
+        await tx.bankAccount.create({
+          data: {
+            employeeId: employee.id,
+            bsb: encrypt(d.bankBsb as string),
+            accountNumber: encrypt(d.bankAccountNumber as string),
+            accountName: d.bankAccountName as string,
+            isPrimary: true,
+          },
+        })
+      }
     }
 
-    // Add emergency contact if provided
+    // ── Emergency contact (add if provided and no primary contact yet) ────────
     if (d.emergencyName && d.emergencyPhone) {
-      await tx.emergencyContact.create({
+      const hasPrimary = await tx.emergencyContact.findFirst({ where: { employeeId: employee.id, isPrimary: true } })
+      if (!hasPrimary) {
+        await tx.emergencyContact.create({
+          data: {
+            employeeId: employee.id,
+            name:         d.emergencyName as string,
+            relationship: (d.emergencyRelationship as string | undefined) || 'Other',
+            phone:        d.emergencyPhone as string,
+            isPrimary:    true,
+          },
+        })
+      }
+    }
+
+    // ── Portal user (create if employee doesn't have one yet) ────────────────
+    let user = await tx.user.findFirst({ where: { employeeId: employee.id }, select: { email: true } })
+    if (!user) {
+      const bcrypt = await import('bcryptjs')
+      const tempPassword = crypto.randomBytes(12).toString('base64url')
+      const passwordHash = await bcrypt.default.hash(tempPassword, 12)
+      user = await tx.user.create({
         data: {
-          employeeId: employee.id,
-          name: d.emergencyName as string,
-          relationship: (d.emergencyRelationship as string | undefined) || 'Other',
-          phone: d.emergencyPhone as string,
-          isPrimary: true,
+          organizationId: record.company.organizationId,
+          email:          record.inviteEmail.toLowerCase(),
+          passwordHash,
+          firstName:      (d.firstName as string) ?? '',
+          lastName:       (d.lastName  as string) ?? '',
+          globalRole:     'ORG_USER',
+          employeeId:     employee.id,
+          companyAccess:  { create: { companyId, role: 'EMPLOYEE' } },
         },
+        select: { email: true },
       })
     }
 
-    // Create portal user account
-    const bcrypt = await import('bcryptjs')
-    const tempPassword = crypto.randomBytes(12).toString('base64url')
-    const passwordHash = await bcrypt.default.hash(tempPassword, 12)
-
-    const user = await tx.user.create({
-      data: {
-        organizationId: record.company.organizationId,
-        email: record.inviteEmail.toLowerCase(),
-        passwordHash,
-        firstName: (d.firstName as string) ?? '',
-        lastName: (d.lastName as string) ?? '',
-        globalRole: 'ORG_USER',
-        employeeId: employee.id,
-        companyAccess: {
-          create: { companyId, role: 'EMPLOYEE' },
-        },
-      },
-    })
-
-    // Mark onboarding as completed
+    // ── Mark onboarding as completed ─────────────────────────────────────────
     await tx.employeeOnboarding.update({
       where: { id: record.id },
-      data: {
-        status: 'COMPLETED',
-        completedAt: new Date(),
-        employeeId: employee.id,
-      },
+      data: { status: 'COMPLETED', completedAt: new Date(), employeeId: employee.id },
     })
 
-    return { employee, user, tempPassword }
+    return { employee, user }
   })
 
   return {
