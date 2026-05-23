@@ -1,6 +1,11 @@
 name: Database Migration
 
-# Triggered manually or automatically after backend deploy on main
+# Manual fallback only — Render runs `prisma migrate deploy` automatically
+# in its startCommand before the app boots, so this workflow is NOT needed
+# on every deploy. Use it to run migrations against staging, or to force a
+# migration outside of a normal deploy (e.g. hotfix, rollback).
+#
+# Requires DATABASE_URL to be set in the target GitHub environment's secrets.
 on:
   workflow_dispatch:
     inputs:
@@ -10,20 +15,12 @@ on:
         default: production
         type: choice
         options: [production, staging]
-  workflow_run:
-    workflows: [Deploy Backend]
-    types: [completed]
-    branches: [main]
 
 jobs:
   migrate:
     name: Run Prisma Migrations
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Only run if triggered manually, or if the deploy workflow succeeded
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
 
     environment: ${{ github.event.inputs.environment || 'production' }}
 
