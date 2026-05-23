@@ -19,26 +19,28 @@ import { AwardWizard, type AwardRecommendation } from '@/components/employees/Aw
 const newEmployeeSchema = z.object({
   firstName: z.string().min(1, 'Required'),
   lastName: z.string().min(1, 'Required'),
-  email: z.string().email('Enter a valid email').or(z.literal('')).optional(),
+  // Use refine instead of .or(z.literal('')) — the latter produces a ZodUnionIssue
+  // object as the error message which React cannot render as a child (Error #31).
+  email: z.string().optional().refine(
+    (val) => !val || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val),
+    'Enter a valid email',
+  ),
   phone: z.string().optional(),
   dateOfBirth: z.string().optional(),
   employmentType: z.enum(['FULL_TIME', 'PART_TIME', 'CASUAL', 'CONTRACTOR']),
   startDate: z.string().min(1, 'Required'),
   payFrequency: z.enum(['WEEKLY', 'FORTNIGHTLY', 'MONTHLY']),
-  awardCode: z.enum(['MA000038', 'MA000039']).optional().or(z.literal('')),
-  classificationLevel: z
-    .enum(['GRADE_1', 'GRADE_2', 'GRADE_3', 'GRADE_4', 'GRADE_5'])
-    .optional()
-    .or(z.literal('')),
+  // Select fields: '' means "nothing chosen". Plain z.string() avoids union errors.
+  awardCode: z.string().optional(),
+  classificationLevel: z.string().optional(),
   // Pay rate (handled separately after employee creation)
   payType: z.enum(['HOURLY', 'SALARY', 'PER_KM', 'PER_LOAD', 'PERCENTAGE_REVENUE']),
   baseRate: z.coerce.number().min(0, 'Must be ≥ 0'),
   // Tax — exact backend field names
-  taxFileNumber: z
-    .string()
-    .regex(/^\d{9}$/, 'TFN must be exactly 9 digits (no spaces or dashes)')
-    .optional()
-    .or(z.literal('')),
+  taxFileNumber: z.string().optional().refine(
+    (val) => !val || /^\d{9}$/.test(val),
+    'TFN must be exactly 9 digits (no spaces or dashes)',
+  ),
   taxResidencyStatus: z.enum(['RESIDENT', 'FOREIGN_RESIDENT', 'WORKING_HOLIDAY_MAKER']),
   claimsTaxFreeThreshold: z.boolean(),
   hasHECSDebt: z.boolean(),
