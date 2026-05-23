@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
 import { authenticate, requireCompanyAccess, getDepotScope } from '../../middleware/auth.middleware.js'
 import { validateBody, validateQuery } from '../../middleware/validate.middleware.js'
+import { writeAuditLog } from '../../middleware/audit.middleware.js'
 import * as service from './timeAttendance.service.js'
 
 export const timeAttendanceRouter = Router()
@@ -15,6 +16,14 @@ timeAttendanceRouter.post('/clock-in', managerAccess, validateBody(service.clock
   try {
     const { companyId } = companyQuery.parse(req.query)
     const entry = await service.clockIn(companyId, req.body)
+    await writeAuditLog(req, {
+      action: 'CREATE',
+      entityType: 'TimeEntry',
+      entityId: entry.id,
+      companyId,
+      employeeId: entry.employeeId,
+      newValues: { clockIn: entry.clockIn },
+    })
     res.status(201).json({ success: true, data: entry })
   } catch (err) { next(err) }
 })
@@ -23,6 +32,14 @@ timeAttendanceRouter.post('/entries/:id/clock-out', managerAccess, validateBody(
   try {
     const { companyId } = companyQuery.parse(req.query)
     const entry = await service.clockOut(companyId, req.params.id, req.body)
+    await writeAuditLog(req, {
+      action: 'UPDATE',
+      entityType: 'TimeEntry',
+      entityId: entry.id,
+      companyId,
+      employeeId: entry.employeeId,
+      newValues: { clockOut: entry.clockOut },
+    })
     res.json({ success: true, data: entry })
   } catch (err) { next(err) }
 })
@@ -31,6 +48,14 @@ timeAttendanceRouter.post('/entries/manual', managerAccess, validateBody(service
   try {
     const { companyId } = companyQuery.parse(req.query)
     const entry = await service.addManualEntry(companyId, req.body, req.user!.id)
+    await writeAuditLog(req, {
+      action: 'CREATE',
+      entityType: 'TimeEntry',
+      entityId: entry.id,
+      companyId,
+      employeeId: entry.employeeId,
+      newValues: { clockIn: entry.clockIn, clockOut: entry.clockOut, isManual: true },
+    })
     res.status(201).json({ success: true, data: entry })
   } catch (err) { next(err) }
 })
@@ -58,6 +83,13 @@ timeAttendanceRouter.post('/timesheets/:id/submit', managerAccess, async (req: R
   try {
     const { companyId } = companyQuery.parse(req.query)
     const ts = await service.submitTimesheet(req.params.id, companyId, req.user!.id)
+    await writeAuditLog(req, {
+      action: 'UPDATE',
+      entityType: 'Timesheet',
+      entityId: ts.id,
+      companyId,
+      newValues: { status: 'SUBMITTED' },
+    })
     res.json({ success: true, data: ts })
   } catch (err) { next(err) }
 })
@@ -68,6 +100,13 @@ timeAttendanceRouter.post('/timesheets/:id/approve', managerAccess, async (req: 
     const { notes } = z.object({ notes: z.string().optional() }).parse(req.body)
     const depotScope = getDepotScope(req, companyId)
     const ts = await service.approveTimesheet(req.params.id, companyId, req.user!.id, notes, depotScope)
+    await writeAuditLog(req, {
+      action: 'TIMESHEET_APPROVED',
+      entityType: 'Timesheet',
+      entityId: ts.id,
+      companyId,
+      newValues: { status: 'APPROVED', notes },
+    })
     res.json({ success: true, data: ts })
   } catch (err) { next(err) }
 })
@@ -78,6 +117,13 @@ timeAttendanceRouter.post('/timesheets/:id/reject', managerAccess, async (req: R
     const { notes } = z.object({ notes: z.string().min(1) }).parse(req.body)
     const depotScope = getDepotScope(req, companyId)
     const ts = await service.rejectTimesheet(req.params.id, companyId, req.user!.id, notes, depotScope)
+    await writeAuditLog(req, {
+      action: 'UPDATE',
+      entityType: 'Timesheet',
+      entityId: ts.id,
+      companyId,
+      newValues: { status: 'REJECTED', notes },
+    })
     res.json({ success: true, data: ts })
   } catch (err) { next(err) }
 })

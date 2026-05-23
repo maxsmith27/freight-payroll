@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
 import { authenticate, requireCompanyAccess } from '../../middleware/auth.middleware.js'
 import { validateBody } from '../../middleware/validate.middleware.js'
+import { writeAuditLog } from '../../middleware/audit.middleware.js'
 import * as service from './compliance.service.js'
 
 export const complianceRouter = Router()
@@ -31,6 +32,14 @@ complianceRouter.post('/employees/:employeeId/licences', payrollAccess, validate
     const { companyId } = companyQuery.parse(req.query)
     const { employeeId } = employeeParams.parse(req.params)
     const licence = await service.addLicence(employeeId, companyId, req.body)
+    await writeAuditLog(req, {
+      action: 'CREATE',
+      entityType: 'DriverLicence',
+      entityId: licence.id,
+      companyId,
+      employeeId,
+      newValues: { licenceClass: licence.licenceClass, expiryDate: licence.expiryDate },
+    })
     res.status(201).json({ success: true, data: licence })
   } catch (err) { next(err) }
 })
@@ -42,6 +51,14 @@ complianceRouter.post('/employees/:employeeId/accreditations', payrollAccess, va
     const { companyId } = companyQuery.parse(req.query)
     const { employeeId } = employeeParams.parse(req.params)
     const accreditation = await service.addAccreditation(employeeId, companyId, req.body)
+    await writeAuditLog(req, {
+      action: 'CREATE',
+      entityType: 'Accreditation',
+      entityId: accreditation.id,
+      companyId,
+      employeeId,
+      newValues: { accreditationType: accreditation.accreditationType, expiryDate: accreditation.expiryDate },
+    })
     res.status(201).json({ success: true, data: accreditation })
   } catch (err) { next(err) }
 })
@@ -53,6 +70,14 @@ complianceRouter.post('/employees/:employeeId/medicals', payrollAccess, validate
     const { companyId } = companyQuery.parse(req.query)
     const { employeeId } = employeeParams.parse(req.params)
     const cert = await service.addMedicalCert(employeeId, companyId, req.body)
+    await writeAuditLog(req, {
+      action: 'CREATE',
+      entityType: 'MedicalCert',
+      entityId: cert.id,
+      companyId,
+      employeeId,
+      newValues: { certType: cert.certType, expiryDate: cert.expiryDate },
+    })
     res.status(201).json({ success: true, data: cert })
   } catch (err) { next(err) }
 })
@@ -63,6 +88,14 @@ complianceRouter.post('/fatigue', managerAccess, async (req: Request, res: Respo
   try {
     const { companyId } = companyQuery.parse(req.query)
     const record = await service.recordFatigueEntry(companyId, req.body)
+    await writeAuditLog(req, {
+      action: 'CREATE',
+      entityType: 'FatigueRecord',
+      entityId: record.id,
+      companyId,
+      employeeId: record.employeeId,
+      newValues: { hoursWorked: record.hoursWorked, recordDate: record.recordDate },
+    })
     res.status(201).json({ success: true, data: record })
   } catch (err) { next(err) }
 })

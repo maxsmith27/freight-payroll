@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
 import { authenticate, requireCompanyAccess, getDepotScope } from '../../middleware/auth.middleware.js'
 import { validateBody, validateQuery } from '../../middleware/validate.middleware.js'
+import { writeAuditLog } from '../../middleware/audit.middleware.js'
 import * as service from './leave.service.js'
 
 export const leaveRouter = Router()
@@ -15,6 +16,14 @@ leaveRouter.post('/requests', managerAccess, validateBody(service.leaveRequestSc
   try {
     const { companyId } = companyQuery.parse(req.query)
     const request = await service.requestLeave(companyId, req.body)
+    await writeAuditLog(req, {
+      action: 'CREATE',
+      entityType: 'LeaveRequest',
+      entityId: request.id,
+      companyId,
+      employeeId: request.employeeId,
+      newValues: { leaveType: request.leaveType, startDate: request.startDate, endDate: request.endDate },
+    })
     res.status(201).json({ success: true, data: request })
   } catch (err) { next(err) }
 })
@@ -40,6 +49,14 @@ leaveRouter.post('/requests/:id/approve', managerAccess, async (req: Request, re
     const { notes } = z.object({ notes: z.string().optional() }).parse(req.body)
     const depotScope = getDepotScope(req, companyId)
     const request = await service.approveLeave(req.params.id, companyId, req.user!.id, notes, depotScope)
+    await writeAuditLog(req, {
+      action: 'LEAVE_APPROVED',
+      entityType: 'LeaveRequest',
+      entityId: request.id,
+      companyId,
+      employeeId: request.employeeId,
+      newValues: { status: 'APPROVED', notes },
+    })
     res.json({ success: true, data: request })
   } catch (err) { next(err) }
 })
@@ -50,6 +67,14 @@ leaveRouter.post('/requests/:id/decline', managerAccess, async (req: Request, re
     const { notes } = z.object({ notes: z.string().min(1) }).parse(req.body)
     const depotScope = getDepotScope(req, companyId)
     const request = await service.declineLeave(req.params.id, companyId, req.user!.id, notes, depotScope)
+    await writeAuditLog(req, {
+      action: 'LEAVE_DECLINED',
+      entityType: 'LeaveRequest',
+      entityId: request.id,
+      companyId,
+      employeeId: request.employeeId,
+      newValues: { status: 'DECLINED', notes },
+    })
     res.json({ success: true, data: request })
   } catch (err) { next(err) }
 })

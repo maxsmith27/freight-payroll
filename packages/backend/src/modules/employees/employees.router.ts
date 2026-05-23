@@ -114,6 +114,14 @@ employeesRouter.post('/:id/pay-rates', payrollAccess, validateBody(service.payRa
     const { companyId } = createQuerySchema.parse(req.query)
     const depotScope = getDepotScope(req, companyId)
     const rate = await service.addPayRate(req.params.id, companyId, req.body, req.user!.id, depotScope)
+    await writeAuditLog(req, {
+      action: 'CREATE',
+      entityType: 'PayRate',
+      entityId: rate.id,
+      companyId,
+      employeeId: req.params.id,
+      newValues: { payType: rate.payType, effectiveFrom: rate.effectiveFrom },
+    })
     res.status(201).json({ success: true, data: rate })
   } catch (err) { next(err) }
 })
@@ -125,6 +133,14 @@ employeesRouter.post('/:id/classifications', payrollAccess, validateBody(service
     const { companyId } = createQuerySchema.parse(req.query)
     const depotScope = getDepotScope(req, companyId)
     const classification = await service.addAwardClassification(req.params.id, companyId, req.body, req.user!.id, depotScope)
+    await writeAuditLog(req, {
+      action: 'CREATE',
+      entityType: 'AwardClassification',
+      entityId: classification.id,
+      companyId,
+      employeeId: req.params.id,
+      newValues: { awardCode: classification.awardCode, classificationLevel: classification.classificationLevel, effectiveFrom: classification.effectiveFrom },
+    })
     res.status(201).json({ success: true, data: classification })
   } catch (err) { next(err) }
 })
@@ -145,6 +161,15 @@ employeesRouter.post('/:id/bank-accounts', payrollAccess, validateBody(service.b
     const { companyId } = createQuerySchema.parse(req.query)
     const depotScope = getDepotScope(req, companyId)
     const account = await service.addBankAccount(req.params.id, companyId, req.body, depotScope)
+    await writeAuditLog(req, {
+      action: 'CREATE',
+      entityType: 'BankAccount',
+      entityId: account.id,
+      companyId,
+      employeeId: req.params.id,
+      // Deliberately omit BSB/account number from audit log values
+      newValues: { accountName: account.accountName, isPrimary: account.isPrimary },
+    })
     res.status(201).json({ success: true, data: account })
   } catch (err) { next(err) }
 })
@@ -179,6 +204,13 @@ employeesRouter.post('/:id/portal-access', adminAccess, validateBody(portalAcces
   try {
     const { companyId } = createQuerySchema.parse(req.query)
     const result = await service.grantPortalAccess(req.params.id, companyId, req.body.password)
+    await writeAuditLog(req, {
+      action: 'PORTAL_ACCESS_GRANTED',
+      entityType: 'Employee',
+      entityId: req.params.id,
+      companyId,
+      employeeId: req.params.id,
+    })
     res.status(201).json({ success: true, data: result })
   } catch (err) { next(err) }
 })
@@ -187,6 +219,13 @@ employeesRouter.delete('/:id/portal-access', adminAccess, async (req: Request, r
   try {
     const { companyId } = createQuerySchema.parse(req.query)
     await service.revokePortalAccess(req.params.id, companyId)
+    await writeAuditLog(req, {
+      action: 'PORTAL_ACCESS_REVOKED',
+      entityType: 'Employee',
+      entityId: req.params.id,
+      companyId,
+      employeeId: req.params.id,
+    })
     res.json({ success: true })
   } catch (err) { next(err) }
 })
@@ -198,6 +237,13 @@ employeesRouter.post('/import', payrollAccess, async (req: Request, res: Respons
     const { companyId } = createQuerySchema.parse(req.query)
     const { rows } = z.object({ rows: z.array(z.any()) }).parse(req.body)
     const result = await service.importEmployees(companyId, rows, req.user!.id)
+    await writeAuditLog(req, {
+      action: 'CREATE',
+      entityType: 'EmployeeImport',
+      entityId: companyId,
+      companyId,
+      newValues: { rowCount: rows.length, imported: result.imported, errors: result.errors?.length ?? 0 },
+    })
     res.json({ success: true, data: result })
   } catch (err) { next(err) }
 })
