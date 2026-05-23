@@ -21,7 +21,7 @@ timeAttendanceRouter.post('/clock-in', managerAccess, validateBody(service.clock
       entityType: 'TimeEntry',
       entityId: entry.id,
       companyId,
-      employeeId: entry.employeeId,
+      employeeId: req.body.employeeId as string,
       newValues: { clockIn: entry.clockIn },
     })
     res.status(201).json({ success: true, data: entry })
@@ -37,7 +37,6 @@ timeAttendanceRouter.post('/entries/:id/clock-out', managerAccess, validateBody(
       entityType: 'TimeEntry',
       entityId: entry.id,
       companyId,
-      employeeId: entry.employeeId,
       newValues: { clockOut: entry.clockOut },
     })
     res.json({ success: true, data: entry })
@@ -53,7 +52,7 @@ timeAttendanceRouter.post('/entries/manual', managerAccess, validateBody(service
       entityType: 'TimeEntry',
       entityId: entry.id,
       companyId,
-      employeeId: entry.employeeId,
+      employeeId: req.body.employeeId as string,
       newValues: { clockIn: entry.clockIn, clockOut: entry.clockOut, isManual: true },
     })
     res.status(201).json({ success: true, data: entry })

@@ -19,8 +19,8 @@ export interface AuditLogEntry {
   action: AuditAction
   entityType: string
   entityId: string
-  newValues: unknown
-  previousValues: unknown
+  newValues: Record<string, unknown> | null
+  previousValues: Record<string, unknown> | null
   ipAddress: string | null
   userId: string | null
   userName: string | null
@@ -87,8 +87,8 @@ export async function listAuditLogs(filters: AuditLogFilters): Promise<AuditLogP
       action:         log.action,
       entityType:     log.entityType,
       entityId:       log.entityId,
-      newValues:      log.newValues,
-      previousValues: log.previousValues,
+      newValues:      (log.newValues ?? null) as Record<string, unknown> | null,
+      previousValues: (log.previousValues ?? null) as Record<string, unknown> | null,
       ipAddress:      log.ipAddress ?? null,
       userId:         log.userId ?? null,
       userName:       user ? `${user.firstName} ${user.lastName}` : null,

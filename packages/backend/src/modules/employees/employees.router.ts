@@ -242,7 +242,7 @@ employeesRouter.post('/import', payrollAccess, async (req: Request, res: Respons
       entityType: 'EmployeeImport',
       entityId: companyId,
       companyId,
-      newValues: { rowCount: rows.length, imported: result.imported, errors: result.errors?.length ?? 0 },
+      newValues: { rowCount: rows.length, created: result.created, errors: result.errors?.length ?? 0 },
     })
     res.json({ success: true, data: result })
   } catch (err) { next(err) }

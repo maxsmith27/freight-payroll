@@ -38,7 +38,7 @@ complianceRouter.post('/employees/:employeeId/licences', payrollAccess, validate
       entityId: licence.id,
       companyId,
       employeeId,
-      newValues: { licenceClass: licence.licenceClass, expiryDate: licence.expiryDate },
+      newValues: { licenceClasses: licence.licenceClasses, expiryDate: licence.expiryDate },
     })
     res.status(201).json({ success: true, data: licence })
   } catch (err) { next(err) }
@@ -94,7 +94,7 @@ complianceRouter.post('/fatigue', managerAccess, async (req: Request, res: Respo
       entityId: record.id,
       companyId,
       employeeId: record.employeeId,
-      newValues: { hoursWorked: record.hoursWorked, recordDate: record.recordDate },
+      newValues: { workMinutes: record.workMinutes, recordDate: record.recordDate, isCompliant: record.isCompliant },
     })
     res.status(201).json({ success: true, data: record })
   } catch (err) { next(err) }

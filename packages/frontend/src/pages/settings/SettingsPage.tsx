@@ -380,8 +380,8 @@ interface AuditEntry {
   action: string
   entityType: string
   entityId: string
-  newValues: unknown
-  previousValues: unknown
+  newValues: Record<string, unknown> | null
+  previousValues: Record<string, unknown> | null
   userId: string | null
   userName: string | null
   userEmail: string | null
