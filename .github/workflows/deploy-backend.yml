@@ -1,11 +1,13 @@
 name: Deploy Backend
 
 on:
+  workflow_dispatch: {}
   push:
     branches: [main]
     paths:
       - 'packages/backend/**'
       - 'packages/shared/**'
+      - 'render.yaml'
       - 'Dockerfile'
       - 'pnpm-lock.yaml'
       - '.github/workflows/deploy-backend.yml'
