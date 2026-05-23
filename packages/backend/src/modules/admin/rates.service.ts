@@ -19,9 +19,9 @@ const NAT3539_2025_26 = {
   paygBrackets: [
     { annualFrom: 0,      annualTo: 18200,  coeffA: 0.1900000, coeffB: 0.19 },
     { annualFrom: 18201,  annualTo: 45000,  coeffA: 0.3477000, coeffB: 3572.00 },
-    { annualFrom: 45001,  annualTo: 120000, coeffA: 0.3450000, coeffB: 3461.00 },
-    { annualFrom: 120001, annualTo: 180000, coeffA: 0.3900000, coeffB: 8961.00 },
-    { annualFrom: 180001, annualTo: null,   coeffA: 0.4700000, coeffB: 23357.00 },
+    { annualFrom: 45001,  annualTo: 135000, coeffA: 0.3450000, coeffB: 3461.00 },
+    { annualFrom: 135001, annualTo: 190000, coeffA: 0.3900000, coeffB: 8961.00 },
+    { annualFrom: 190001, annualTo: null,   coeffA: 0.4700000, coeffB: 23357.00 },
   ],
 }
 

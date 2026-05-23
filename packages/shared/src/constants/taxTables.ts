@@ -39,6 +39,15 @@ export const RESIDENT_TAX_BRACKETS: TaxBracket[] = [
   { from: 190001, to: null, base: 54742, rate: 0.45 },
 ]
 
+// Scale 1: resident, does NOT claim the tax-free threshold (e.g. second job holders).
+// No $18,200 free band, no LITO. Tax applies from $0 at 19%.
+export const RESIDENT_SCALE1_TAX_BRACKETS: TaxBracket[] = [
+  { from: 0, to: 45000, base: 0, rate: 0.19 },
+  { from: 45001, to: 135000, base: 8550, rate: 0.325 },
+  { from: 135001, to: 190000, base: 37800, rate: 0.37 },
+  { from: 190001, to: null, base: 58150, rate: 0.45 },
+]
+
 export const FOREIGN_RESIDENT_TAX_BRACKETS: TaxBracket[] = [
   { from: 0, to: 135000, base: 0, rate: 0.325 },
   { from: 135001, to: 190000, base: 43875, rate: 0.37 },
@@ -132,6 +141,7 @@ export const PAY_FREQUENCY_PERIODS: Record<PayFrequency, number> = {
 export function calculateAnnualTax(
   annualIncome: number,
   residencyStatus: TaxResidencyStatus,
+  claimsTaxFreeThreshold = true,
 ): number {
   let brackets: TaxBracket[]
   if (residencyStatus === 'FOREIGN_RESIDENT') {
@@ -139,7 +149,7 @@ export function calculateAnnualTax(
   } else if (residencyStatus === 'WORKING_HOLIDAY_MAKER') {
     brackets = WHM_TAX_BRACKETS
   } else {
-    brackets = RESIDENT_TAX_BRACKETS
+    brackets = claimsTaxFreeThreshold ? RESIDENT_TAX_BRACKETS : RESIDENT_SCALE1_TAX_BRACKETS
   }
 
   for (const bracket of brackets) {
@@ -228,23 +238,14 @@ export function calculatePAYGWithholding(params: {
   const periods = PAY_FREQUENCY_PERIODS[payFrequency]
   const annualEarnings = periodEarnings * periods
 
-  // Annual income tax
-  let annualTax = calculateAnnualTax(annualEarnings, taxResidencyStatus)
+  // Scale 1 (no TFT): use different brackets — no $18,200 free band, no LITO
+  // Scale 2 (claims TFT): standard brackets, then reduce by LITO
+  let annualTax = calculateAnnualTax(annualEarnings, taxResidencyStatus, claimsTaxFreeThreshold)
 
-  // LITO — only for residents claiming TFT
   let litoOffset = 0
   if (taxResidencyStatus === 'RESIDENT' && claimsTaxFreeThreshold) {
     litoOffset = calculateLITO(annualEarnings)
     annualTax = Math.max(0, annualTax - litoOffset)
-  }
-
-  // Not claiming TFT: no LITO but add $549 low income offset adjustment
-  // (simplified — ATO formula applies a withholding adjustment for non-TFT)
-  if (taxResidencyStatus === 'RESIDENT' && !claimsTaxFreeThreshold) {
-    // Withhold as if no tax-free threshold: no LITO, and use higher rates
-    // The ATO handles this via Scale 2. For simplicity we add a fixed adjustment.
-    // Full implementation: use ATO coefficient tables for Scale 2.
-    annualTax = Math.max(0, annualTax + 3572) // approximate Scale 2 adjustment
   }
 
   // Medicare levy
