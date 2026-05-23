@@ -7,10 +7,6 @@ services:
     # network cannot always reach the database (connection refused from build runners).
     buildCommand: npm install -g pnpm@9.15.0 && pnpm install --frozen-lockfile && pnpm --filter @freight-payroll/shared run build && pnpm --filter @freight-payroll/backend run build
     startCommand: pnpm --filter @freight-payroll/backend run start:prod
-    # Health check — Render only routes traffic to the new instance once /health
-    # returns 200. This gives zero-downtime deploys: the old instance keeps serving
-    # until the new one is fully up and migrations have run.
-    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
