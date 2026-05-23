@@ -51,13 +51,13 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
-      # vercel deploy --prebuilt (from repo root) looks for output at
-      # {rootDirectory}/.vercel/output/ = packages/frontend/.vercel/output/
+      # vercel pull writes its config to {cwd}/.vercel/; vercel deploy --prebuilt
+      # looks for the output in that same {cwd}/.vercel/output/ directory.
       - name: Prepare prebuilt output
         run: |
-          mkdir -p packages/frontend/.vercel/output/static
-          cp -r packages/frontend/dist/. packages/frontend/.vercel/output/static/
-          echo '{"version":3}' > packages/frontend/.vercel/output/config.json
+          mkdir -p .vercel/output/static
+          cp -r packages/frontend/dist/. .vercel/output/static/
+          echo '{"version":3}' > .vercel/output/config.json
 
       - name: Deploy to Vercel
         run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
