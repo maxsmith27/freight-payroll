@@ -33,6 +33,20 @@ function scheduleDailyComplianceAlerts() {
   logger.info(`Compliance alerts scheduled — first run in ${Math.round(msUntilFirst / 60000)} minutes`)
 }
 
+// ─── Keep-alive ping ─────────────────────────────────────────────────────────
+// Render's free tier spins down services after 15 minutes of inactivity,
+// returning 405 on the next POST request before the service wakes up.
+// Pinging /health every 10 minutes keeps the service warm at no cost.
+function keepAlive() {
+  const url = `http://localhost:${config.PORT}/health`
+  setInterval(() => {
+    fetch(url).catch(() => {
+      // Swallow errors — if the server is mid-restart this will fail harmlessly
+    })
+  }, 10 * 60 * 1000) // every 10 minutes
+  logger.info('Keep-alive ping enabled (every 10 min)')
+}
+
 async function main() {
   // Test DB connection
   await prisma.$connect()
@@ -46,6 +60,7 @@ async function main() {
   // Start daily compliance email scheduler (only in production to avoid noise in dev)
   if (config.NODE_ENV === 'production') {
     scheduleDailyComplianceAlerts()
+    keepAlive()
   }
 
   // Graceful shutdown
