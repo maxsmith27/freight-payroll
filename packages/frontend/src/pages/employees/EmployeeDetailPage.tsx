@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, AlertTriangle, UserCheck, UserX, Send, RotateCcw, XCircle, Clock, UserMinus, Plus, Pencil, X } from 'lucide-react'
+import { ArrowLeft, AlertTriangle, UserCheck, UserX, Send, RotateCcw, XCircle, Clock, UserMinus, Plus, Pencil, X, Paperclip, FileText, ExternalLink, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -44,6 +44,7 @@ interface DriverLicence {
   licenceClasses: string[]
   issueDate: string
   expiryDate: string
+  documentKey: string | null
 }
 
 interface Accreditation {
@@ -51,6 +52,7 @@ interface Accreditation {
   accreditationType: string
   certificateNumber: string | null
   expiryDate: string | null
+  documentKey: string | null
 }
 
 interface MedicalCert {
@@ -59,6 +61,7 @@ interface MedicalCert {
   issueDate: string
   expiryDate: string | null
   restrictions: string | null
+  documentKey: string | null
 }
 
 const AUSTRALIAN_STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'] as const
@@ -160,6 +163,11 @@ export function EmployeeDetailPage() {
     taxNote: string
   }>(null)
   const [calculatingPay, setCalculatingPay] = useState(false)
+
+  // ── Document upload state ──
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingDocId, setUploadingDocId] = useState<string | null>(null)
+  const [uploadingDocType, setUploadingDocType] = useState<'licence' | 'accreditation' | 'medical' | null>(null)
 
   // ── Employment edit state ──
   const [showEditEmployment, setShowEditEmployment] = useState(false)
@@ -317,6 +325,48 @@ export function EmployeeDetailPage() {
     onError: err => setEmploymentEditError(apiError(err)),
   })
 
+  // ── Document upload ──────────────────────────────────────────────────────────
+
+  function triggerDocUpload(docType: 'licence' | 'accreditation' | 'medical', docId: string) {
+    setUploadingDocType(docType)
+    setUploadingDocId(docId)
+    fileInputRef.current?.click()
+  }
+
+  async function handleDocFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !uploadingDocType || !uploadingDocId) return
+    // Reset so the same file can be re-uploaded after a fix
+    e.target.value = ''
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      await api.post(
+        `/compliance/documents/${uploadingDocType}/${uploadingDocId}?companyId=${activeCompanyId}`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      queryClient.invalidateQueries({ queryKey: ['employee', id] })
+      toast({ title: 'Document attached' })
+    } catch (err) {
+      toast({ title: 'Upload failed', description: apiError(err), variant: 'destructive' })
+    } finally {
+      setUploadingDocType(null)
+      setUploadingDocId(null)
+    }
+  }
+
+  async function viewDocument(docType: 'licence' | 'accreditation' | 'medical', docId: string) {
+    try {
+      const { data } = await api.get(
+        `/compliance/documents/${docType}/${docId}?companyId=${activeCompanyId}`,
+      )
+      window.open(data.data.url, '_blank', 'noopener,noreferrer')
+    } catch (err) {
+      toast({ title: 'Could not open document', description: apiError(err), variant: 'destructive' })
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="flex flex-col gap-0">
@@ -361,6 +411,15 @@ export function EmployeeDetailPage() {
 
   return (
     <div className="flex flex-col gap-0">
+      {/* Hidden file input shared by all three compliance document upload buttons */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf,.jpg,.jpeg,.png,.webp"
+        className="hidden"
+        onChange={handleDocFileChange}
+      />
+
       <PageHeader
         title={fullName}
         description={`${emp.employeeNumber} · ${employmentTypeLabel(emp.employmentType)}`}
@@ -655,11 +714,13 @@ export function EmployeeDetailPage() {
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Number</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">State</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Expiry</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Document</th>
                       </tr>
                     </thead>
                     <tbody>
                       {emp.licences.map(l => {
                         const daysLeft = Math.ceil((new Date(l.expiryDate).getTime() - Date.now()) / 86400000)
+                        const isUploading = uploadingDocId === l.id && uploadingDocType === 'licence'
                         return (
                           <tr key={l.id} className="border-b last:border-0">
                             <td className="px-4 py-3 font-medium">{l.licenceClasses.join(', ')}</td>
@@ -674,6 +735,14 @@ export function EmployeeDetailPage() {
                                   {daysLeft < 0 ? 'Expired' : `${daysLeft}d`}
                                 </Badge>
                               )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <DocCell
+                                hasDoc={!!l.documentKey}
+                                isUploading={isUploading}
+                                onView={() => viewDocument('licence', l.id)}
+                                onUpload={() => triggerDocUpload('licence', l.id)}
+                              />
                             </td>
                           </tr>
                         )
@@ -765,18 +834,30 @@ export function EmployeeDetailPage() {
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Type</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Certificate #</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Expiry</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Document</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {emp.accreditations.map(a => (
-                        <tr key={a.id} className="border-b last:border-0">
-                          <td className="px-4 py-3">{a.accreditationType.replace(/_/g, ' ')}</td>
-                          <td className="px-4 py-3 text-muted-foreground">{a.certificateNumber ?? '—'}</td>
-                          <td className="px-4 py-3 text-muted-foreground">
-                            {a.expiryDate ? formatDate(a.expiryDate) : '—'}
-                          </td>
-                        </tr>
-                      ))}
+                      {emp.accreditations.map(a => {
+                        const isUploading = uploadingDocId === a.id && uploadingDocType === 'accreditation'
+                        return (
+                          <tr key={a.id} className="border-b last:border-0">
+                            <td className="px-4 py-3">{a.accreditationType.replace(/_/g, ' ')}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{a.certificateNumber ?? '—'}</td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {a.expiryDate ? formatDate(a.expiryDate) : '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              <DocCell
+                                hasDoc={!!a.documentKey}
+                                isUploading={isUploading}
+                                onView={() => viewDocument('accreditation', a.id)}
+                                onUpload={() => triggerDocUpload('accreditation', a.id)}
+                              />
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 )}
@@ -852,19 +933,31 @@ export function EmployeeDetailPage() {
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Issue date</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Expiry</th>
                         <th className="px-4 py-3 text-left font-medium text-muted-foreground">Restrictions</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Document</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {emp.medicalCerts.map(m => (
-                        <tr key={m.id} className="border-b last:border-0">
-                          <td className="px-4 py-3">{m.certType.replace(/_/g, ' ')}</td>
-                          <td className="px-4 py-3 text-muted-foreground">{formatDate(m.issueDate)}</td>
-                          <td className="px-4 py-3 text-muted-foreground">
-                            {m.expiryDate ? formatDate(m.expiryDate) : '—'}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground">{m.restrictions ?? 'None'}</td>
-                        </tr>
-                      ))}
+                      {emp.medicalCerts.map(m => {
+                        const isUploading = uploadingDocId === m.id && uploadingDocType === 'medical'
+                        return (
+                          <tr key={m.id} className="border-b last:border-0">
+                            <td className="px-4 py-3">{m.certType.replace(/_/g, ' ')}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{formatDate(m.issueDate)}</td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {m.expiryDate ? formatDate(m.expiryDate) : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">{m.restrictions ?? 'None'}</td>
+                            <td className="px-4 py-3">
+                              <DocCell
+                                hasDoc={!!m.documentKey}
+                                isUploading={isUploading}
+                                onView={() => viewDocument('medical', m.id)}
+                                onUpload={() => triggerDocUpload('medical', m.id)}
+                              />
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 )}
@@ -1244,6 +1337,63 @@ function Row({ label, value }: { label: string; value: string | null | undefined
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium text-right">{value ?? '—'}</span>
     </div>
+  )
+}
+
+// ─── DocCell ──────────────────────────────────────────────────────────────────
+// Renders either a "View" button (if document exists) or an "Attach" button.
+// "Replace" appears as a secondary action when a document is already attached.
+
+function DocCell({
+  hasDoc,
+  isUploading,
+  onView,
+  onUpload,
+}: {
+  hasDoc: boolean
+  isUploading: boolean
+  onView: () => void
+  onUpload: () => void
+}) {
+  if (isUploading) {
+    return (
+      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+        <Upload className="h-3.5 w-3.5 animate-pulse" />
+        Uploading…
+      </span>
+    )
+  }
+  if (hasDoc) {
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onView}
+          className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium"
+        >
+          <FileText className="h-3.5 w-3.5" />
+          View
+          <ExternalLink className="h-3 w-3" />
+        </button>
+        <button
+          type="button"
+          onClick={onUpload}
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
+          Replace
+        </button>
+      </div>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={onUpload}
+      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+    >
+      <Paperclip className="h-3.5 w-3.5" />
+      Attach
+    </button>
   )
 }
 

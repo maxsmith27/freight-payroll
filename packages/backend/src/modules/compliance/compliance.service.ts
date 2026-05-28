@@ -3,6 +3,87 @@ import prisma from '../../lib/prisma.js'
 import { NotFoundError } from '../../middleware/error.middleware.js'
 import { sendEmail, complianceAlertEmail, type ComplianceAlertItem } from '../../lib/email.js'
 import { logger } from '../../lib/logger.js'
+import { uploadFile, deleteFile, getFileUrl } from '../../lib/storage.js'
+
+// ─── Document attachment ─────────────────────────────────────────────────────
+
+export type ComplianceDocType = 'licence' | 'accreditation' | 'medical'
+
+/**
+ * Upload a file and attach it to an existing compliance record.
+ * Replaces any previously attached document (old file is deleted from storage).
+ */
+export async function attachComplianceDocument(
+  docType: ComplianceDocType,
+  docId: string,
+  companyId: string,
+  file: { buffer: Buffer; originalname: string; mimetype: string },
+): Promise<string> {
+  // Verify the record exists and belongs to this company
+  const existing = await findComplianceRecord(docType, docId, companyId)
+  if (!existing) throw new NotFoundError('Compliance record')
+
+  // Build a deterministic storage key: {docType}/{companyId}/{docId}/{filename}
+  const ext = file.originalname.split('.').pop()?.toLowerCase() ?? 'bin'
+  const key = `compliance/${docType}/${companyId}/${docId}.${ext}`
+
+  // Delete the old document if there was one and the key is different
+  if (existing.documentKey && existing.documentKey !== key) {
+    await deleteFile(existing.documentKey).catch(() => {})
+  }
+
+  await uploadFile({ key, body: file.buffer, contentType: file.mimetype })
+  await updateDocumentKey(docType, docId, key)
+  return key
+}
+
+/**
+ * Get a URL for viewing a compliance document.
+ * Returns a signed URL for S3 or a local path for dev.
+ */
+export async function getComplianceDocumentUrl(
+  docType: ComplianceDocType,
+  docId: string,
+  companyId: string,
+): Promise<string> {
+  const existing = await findComplianceRecord(docType, docId, companyId)
+  if (!existing) throw new NotFoundError('Compliance record')
+  if (!existing.documentKey) throw new NotFoundError('No document attached to this record')
+  return getFileUrl(existing.documentKey)
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async function findComplianceRecord(docType: ComplianceDocType, docId: string, companyId: string) {
+  switch (docType) {
+    case 'licence':
+      return prisma.driverLicence.findFirst({
+        where: { id: docId, employee: { companyId } },
+        select: { id: true, documentKey: true },
+      })
+    case 'accreditation':
+      return prisma.accreditation.findFirst({
+        where: { id: docId, employee: { companyId } },
+        select: { id: true, documentKey: true },
+      })
+    case 'medical':
+      return prisma.medicalCertificate.findFirst({
+        where: { id: docId, employee: { companyId } },
+        select: { id: true, documentKey: true },
+      })
+  }
+}
+
+async function updateDocumentKey(docType: ComplianceDocType, docId: string, key: string) {
+  switch (docType) {
+    case 'licence':
+      return prisma.driverLicence.update({ where: { id: docId }, data: { documentKey: key } })
+    case 'accreditation':
+      return prisma.accreditation.update({ where: { id: docId }, data: { documentKey: key } })
+    case 'medical':
+      return prisma.medicalCertificate.update({ where: { id: docId }, data: { documentKey: key } })
+  }
+}
 
 export const licenceSchema = z.object({
   licenceNumber: z.string().min(1),

@@ -1,9 +1,20 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
+import multer from 'multer'
 import { authenticate, requireCompanyAccess } from '../../middleware/auth.middleware.js'
 import { validateBody } from '../../middleware/validate.middleware.js'
 import { writeAuditLog } from '../../middleware/audit.middleware.js'
 import * as service from './compliance.service.js'
+
+// Multer: memory storage, 10 MB limit, PDFs and images only
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+    cb(null, allowed.includes(file.mimetype))
+  },
+})
 
 export const complianceRouter = Router()
 complianceRouter.use(authenticate)
@@ -91,6 +102,55 @@ complianceRouter.post('/employees/:employeeId/medicals', payrollAccess, validate
     res.status(201).json({ success: true, data: cert })
   } catch (err) { next(err) }
 })
+
+// ─── Document upload & retrieval ─────────────────────────────────────────────
+//
+// POST /compliance/documents/:docType/:docId  — attach or replace a file
+// GET  /compliance/documents/:docType/:docId  — get a signed/local URL to view
+
+const docTypeSchema = z.enum(['licence', 'accreditation', 'medical'])
+
+complianceRouter.post(
+  '/documents/:docType/:docId',
+  payrollAccess,
+  upload.single('file'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { companyId } = z.object({ companyId: z.string() }).parse(req.query)
+      const docType = docTypeSchema.parse(req.params.docType)
+      const { docId } = req.params
+
+      if (!req.file) {
+        res.status(400).json({ success: false, error: 'No file provided. Accepted: PDF, JPEG, PNG, WEBP (max 10 MB).' })
+        return
+      }
+
+      const key = await service.attachComplianceDocument(docType, docId, companyId, req.file)
+      await writeAuditLog(req, {
+        action: 'UPDATE',
+        entityType: docType === 'licence' ? 'DriverLicence' : docType === 'accreditation' ? 'Accreditation' : 'MedicalCert',
+        entityId: docId,
+        companyId,
+        newValues: { documentKey: key },
+      })
+      res.json({ success: true, data: { key } })
+    } catch (err) { next(err) }
+  },
+)
+
+complianceRouter.get(
+  '/documents/:docType/:docId',
+  payrollAccess,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { companyId } = z.object({ companyId: z.string() }).parse(req.query)
+      const docType = docTypeSchema.parse(req.params.docType)
+      const { docId } = req.params
+      const url = await service.getComplianceDocumentUrl(docType, docId, companyId)
+      res.json({ success: true, data: { url } })
+    } catch (err) { next(err) }
+  },
+)
 
 // ─── Fatigue management ───────────────────────────────────────────────────────
 
