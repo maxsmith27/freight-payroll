@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, AlertTriangle, UserCheck, UserX, Send, RotateCcw, XCircle, Clock, UserMinus, Plus } from 'lucide-react'
+import { ArrowLeft, AlertTriangle, UserCheck, UserX, Send, RotateCcw, XCircle, Clock, UserMinus, Plus, Pencil, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -61,6 +61,18 @@ interface MedicalCert {
   restrictions: string | null
 }
 
+const AUSTRALIAN_STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'] as const
+const STATE_LABELS: Record<string, string> = {
+  NSW: 'New South Wales',
+  VIC: 'Victoria',
+  QLD: 'Queensland',
+  WA: 'Western Australia',
+  SA: 'South Australia',
+  TAS: 'Tasmania',
+  ACT: 'Australian Capital Territory',
+  NT: 'Northern Territory',
+}
+
 interface EmployeeDetail {
   id: string
   employeeNumber: string
@@ -74,6 +86,7 @@ interface EmployeeDetail {
   addressSuburb: string | null
   addressState: string | null
   addressPostcode: string | null
+  stateOfEmployment: string | null
   employmentType: string
   startDate: string
   endDate: string | null
@@ -147,6 +160,15 @@ export function EmployeeDetailPage() {
     taxNote: string
   }>(null)
   const [calculatingPay, setCalculatingPay] = useState(false)
+
+  // ── Employment edit state ──
+  const [showEditEmployment, setShowEditEmployment] = useState(false)
+  const [employmentEditForm, setEmploymentEditForm] = useState({
+    stateOfEmployment: '',
+    employmentType: '',
+    payFrequency: '',
+  })
+  const [employmentEditError, setEmploymentEditError] = useState('')
 
   // ── Bank account form state ──
   const [showAddBank, setShowAddBank] = useState(false)
@@ -280,6 +302,21 @@ export function EmployeeDetailPage() {
     onError: err => setMedicalError(apiError(err)),
   })
 
+  const updateEmploymentMutation = useMutation({
+    mutationFn: () => api.put(`/employees/${id}?companyId=${activeCompanyId}`, {
+      stateOfEmployment: employmentEditForm.stateOfEmployment || undefined,
+      employmentType: employmentEditForm.employmentType || undefined,
+      payFrequency: employmentEditForm.payFrequency || undefined,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employee', id] })
+      setShowEditEmployment(false)
+      setEmploymentEditError('')
+      toast({ title: 'Employment details updated' })
+    },
+    onError: err => setEmploymentEditError(apiError(err)),
+  })
+
   if (isLoading) {
     return (
       <div className="flex flex-col gap-0">
@@ -389,18 +426,112 @@ export function EmployeeDetailPage() {
               </Card>
 
               <Card>
-                <CardHeader><CardTitle className="text-base">Employment</CardTitle></CardHeader>
+                <CardHeader className="flex flex-row items-center justify-between pb-3">
+                  <CardTitle className="text-base">Employment</CardTitle>
+                  {emp.isActive && !showEditEmployment && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => {
+                        setEmploymentEditForm({
+                          stateOfEmployment: emp.stateOfEmployment ?? '',
+                          employmentType: emp.employmentType,
+                          payFrequency: emp.payFrequency,
+                        })
+                        setEmploymentEditError('')
+                        setShowEditEmployment(true)
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5 mr-1" />Edit
+                    </Button>
+                  )}
+                </CardHeader>
                 <CardContent className="space-y-3 text-sm">
-                  <Row label="Type" value={employmentTypeLabel(emp.employmentType)} />
-                  <Row label="Start date" value={formatDate(emp.startDate)} />
-                  {emp.endDate && <Row label="End date" value={formatDate(emp.endDate)} />}
-                  <Row label="Pay frequency" value={emp.payFrequency} />
-                  <Row label="Depot" value={emp.depot?.name ?? null} />
-                  {emp.awardCode && (
-                    <Row
-                      label="Award"
-                      value={`${emp.awardCode} — ${classificationLabel(emp.classificationLevel ?? '')}`}
-                    />
+                  {showEditEmployment ? (
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">State of employment</label>
+                        <select
+                          className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          value={employmentEditForm.stateOfEmployment}
+                          onChange={e => setEmploymentEditForm(f => ({ ...f, stateOfEmployment: e.target.value }))}
+                        >
+                          <option value="">— Select state —</option>
+                          {AUSTRALIAN_STATES.map(s => (
+                            <option key={s} value={s}>{s} — {STATE_LABELS[s]}</option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-muted-foreground">Determines public holidays for pay calculations</p>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">Employment type</label>
+                        <select
+                          className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          value={employmentEditForm.employmentType}
+                          onChange={e => setEmploymentEditForm(f => ({ ...f, employmentType: e.target.value }))}
+                        >
+                          <option value="FULL_TIME">Full-time</option>
+                          <option value="PART_TIME">Part-time</option>
+                          <option value="CASUAL">Casual</option>
+                          <option value="CONTRACTOR">Contractor</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">Pay frequency</label>
+                        <select
+                          className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          value={employmentEditForm.payFrequency}
+                          onChange={e => setEmploymentEditForm(f => ({ ...f, payFrequency: e.target.value }))}
+                        >
+                          <option value="WEEKLY">Weekly</option>
+                          <option value="FORTNIGHTLY">Fortnightly</option>
+                          <option value="MONTHLY">Monthly</option>
+                        </select>
+                      </div>
+                      {employmentEditError && (
+                        <p className="text-xs text-destructive">{employmentEditError}</p>
+                      )}
+                      <div className="flex gap-2 pt-1">
+                        <Button
+                          size="sm"
+                          onClick={() => updateEmploymentMutation.mutate()}
+                          disabled={updateEmploymentMutation.isPending}
+                        >
+                          {updateEmploymentMutation.isPending && <RotateCcw className="h-3.5 w-3.5 animate-spin mr-1" />}
+                          Save
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => { setShowEditEmployment(false); setEmploymentEditError('') }}
+                        >
+                          <X className="h-3.5 w-3.5 mr-1" />Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <Row label="Type" value={employmentTypeLabel(emp.employmentType)} />
+                      <Row label="Start date" value={formatDate(emp.startDate)} />
+                      {emp.endDate && <Row label="End date" value={formatDate(emp.endDate)} />}
+                      <Row label="Pay frequency" value={emp.payFrequency} />
+                      <Row
+                        label="State of employment"
+                        value={
+                          emp.stateOfEmployment
+                            ? `${emp.stateOfEmployment} — ${STATE_LABELS[emp.stateOfEmployment] ?? ''}`
+                            : null
+                        }
+                      />
+                      <Row label="Depot" value={emp.depot?.name ?? null} />
+                      {emp.awardCode && (
+                        <Row
+                          label="Award"
+                          value={`${emp.awardCode} — ${classificationLabel(emp.classificationLevel ?? '')}`}
+                        />
+                      )}
+                    </>
                   )}
                 </CardContent>
               </Card>

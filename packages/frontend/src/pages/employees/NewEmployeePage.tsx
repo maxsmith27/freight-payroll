@@ -16,6 +16,18 @@ import { AwardWizard, type AwardRecommendation } from '@/components/employees/Aw
 
 // ─── Form schema (matches backend field names exactly) ─────────────────────
 
+const AUSTRALIAN_STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'] as const
+const STATE_LABELS: Record<string, string> = {
+  NSW: 'New South Wales',
+  VIC: 'Victoria',
+  QLD: 'Queensland',
+  WA: 'Western Australia',
+  SA: 'South Australia',
+  TAS: 'Tasmania',
+  ACT: 'Australian Capital Territory',
+  NT: 'Northern Territory',
+}
+
 const newEmployeeSchema = z.object({
   firstName: z.string().min(1, 'Required'),
   lastName: z.string().min(1, 'Required'),
@@ -27,6 +39,7 @@ const newEmployeeSchema = z.object({
   ),
   phone: z.string().optional(),
   dateOfBirth: z.string().optional(),
+  stateOfEmployment: z.enum(AUSTRALIAN_STATES, { errorMap: () => ({ message: 'Required' }) }),
   employmentType: z.enum(['FULL_TIME', 'PART_TIME', 'CASUAL', 'CONTRACTOR']),
   startDate: z.string().min(1, 'Required'),
   payFrequency: z.enum(['WEEKLY', 'FORTNIGHTLY', 'MONTHLY']),
@@ -196,6 +209,7 @@ export function NewEmployeePage() {
         email: values.email || undefined,
         phone: values.phone || undefined,
         dateOfBirth: values.dateOfBirth ? new Date(values.dateOfBirth).toISOString() : undefined,
+        stateOfEmployment: values.stateOfEmployment,
         employmentType: values.employmentType,
         startDate: startDateISO,
         payFrequency: values.payFrequency,
@@ -270,6 +284,27 @@ export function NewEmployeePage() {
               <div className="space-y-1.5">
                 <Label>Date of birth</Label>
                 <Input type="date" {...register('dateOfBirth')} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>
+                  State of employment *
+                </Label>
+                <select
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  {...register('stateOfEmployment')}
+                >
+                  <option value="">— Select state —</option>
+                  {AUSTRALIAN_STATES.map(s => (
+                    <option key={s} value={s}>{s} — {STATE_LABELS[s]}</option>
+                  ))}
+                </select>
+                {errors.stateOfEmployment
+                  ? <p className="text-xs text-destructive">{errors.stateOfEmployment.message}</p>
+                  : <p className="text-xs text-muted-foreground flex items-start gap-1">
+                      <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      Where the employee primarily works — determines public holidays for pay calculations
+                    </p>
+                }
               </div>
             </CardContent>
           </Card>
