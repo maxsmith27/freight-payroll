@@ -10,3 +10,10 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Self-reference: tells the keep-alive what URL to ping so requests go through
+      # Render's edge network (localhost pings don't count as activity).
+      - key: RENDER_EXTERNAL_HOSTNAME
+        fromService:
+          type: web
+          name: freight-payroll-backend
+          property: host

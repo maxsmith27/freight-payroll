@@ -45,19 +45,23 @@ function scheduleDailyComplianceAlerts() {
 // Render automatically injects RENDER_EXTERNAL_URL for all web services.
 // We ping /health every 10 minutes via that URL so Render sees live traffic.
 function keepAlive() {
-  const url = config.RENDER_EXTERNAL_URL
-    ? `${config.RENDER_EXTERNAL_URL}/health`
-    : `http://localhost:${config.PORT}/health` // fallback: local dev only
+  // RENDER_EXTERNAL_HOSTNAME is injected via render.yaml fromService reference.
+  // It contains the bare hostname (e.g. freight-payroll-backend.onrender.com).
+  // We prepend https:// so the request goes through Render's edge network,
+  // which is what actually resets the inactivity timer.
+  const url = config.RENDER_EXTERNAL_HOSTNAME
+    ? `https://${config.RENDER_EXTERNAL_HOSTNAME}/health`
+    : `http://localhost:${config.PORT}/health` // local dev only — never reaches Render
 
-  if (!config.RENDER_EXTERNAL_URL) {
-    logger.warn('RENDER_EXTERNAL_URL not set — keep-alive will use localhost (ineffective on Render free tier)')
+  if (!config.RENDER_EXTERNAL_HOSTNAME) {
+    logger.warn('RENDER_EXTERNAL_HOSTNAME not set — keep-alive is using localhost and will NOT prevent sleep on Render')
   }
 
   setInterval(() => {
     fetch(url).catch(err => {
       logger.warn('Keep-alive ping failed', { url, error: String(err) })
     })
-  }, 10 * 60 * 1000) // every 10 minutes
+  }, 10 * 60 * 1000) // every 10 minutes — Render sleeps after 15 min inactivity
 
   logger.info(`Keep-alive ping enabled — target: ${url}`)
 }

@@ -38,10 +38,11 @@ const envSchema = z.object({
 
   SENTRY_DSN: z.string().optional(),
 
-  // Automatically set by Render for all web services — the public HTTPS URL
-  // of this service. Used by the keep-alive ping so it goes through Render's
-  // edge network (localhost pings are internal and don't count as activity).
-  RENDER_EXTERNAL_URL: z.string().optional(),
+  // Set via render.yaml fromService reference — the public hostname of this
+  // service (e.g. freight-payroll-backend.onrender.com, no protocol).
+  // Used by the keep-alive ping so requests go through Render's edge network
+  // (localhost pings are internal and don't count as activity).
+  RENDER_EXTERNAL_HOSTNAME: z.string().optional(),
 })
 
 function parseEnv() {
