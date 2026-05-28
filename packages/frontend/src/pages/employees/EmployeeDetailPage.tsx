@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, AlertTriangle, UserCheck, UserX, Send, RotateCcw, XCircle, Clock, UserMinus, Plus, Pencil, X, Paperclip, FileText, ExternalLink, Upload } from 'lucide-react'
+import { ArrowLeft, AlertTriangle, UserCheck, UserX, Send, RotateCcw, XCircle, Clock, UserMinus, Plus, Pencil, X, Paperclip, FileText, ExternalLink, Upload, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -62,6 +62,16 @@ interface MedicalCert {
   expiryDate: string | null
   restrictions: string | null
   documentKey: string | null
+}
+
+interface EmployeeDocumentRecord {
+  id: string
+  documentType: string
+  fileName: string
+  fileSize: number
+  mimeType: string
+  description: string | null
+  createdAt: string
 }
 
 const AUSTRALIAN_STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'] as const
@@ -196,6 +206,15 @@ export function EmployeeDetailPage() {
   const [medicalForm, setMedicalForm] = useState({ certType: '', issueDate: '', expiryDate: '', restrictions: '' })
   const [medicalError, setMedicalError] = useState('')
 
+  // ── Employee document (contract/file) upload state ──
+  const docFileRef = useRef<HTMLInputElement>(null)
+  const [showUploadDocForm, setShowUploadDocForm] = useState(false)
+  const [uploadDocType, setUploadDocType] = useState('EMPLOYMENT_CONTRACT')
+  const [uploadDocDesc, setUploadDocDesc] = useState('')
+  const [uploadDocFile, setUploadDocFile] = useState<File | null>(null)
+  const [uploadDocError, setUploadDocError] = useState('')
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false)
+
   const { data: emp, isLoading, isError, error } = useQuery<EmployeeDetail>({
     queryKey: ['employee', id],
     queryFn: async () => {
@@ -204,6 +223,16 @@ export function EmployeeDetailPage() {
     },
     enabled: !!id && !!activeCompanyId,
   })
+
+  const { data: employeeDocsRaw } = useQuery<EmployeeDocumentRecord[]>({
+    queryKey: ['employee-docs', id],
+    queryFn: async () => {
+      const { data } = await api.get(`/employees/${id}/documents?companyId=${activeCompanyId}`)
+      return data.data
+    },
+    enabled: !!id && !!activeCompanyId,
+  })
+  const employeeDocs = employeeDocsRaw ?? []
 
   const grantPortalMutation = useMutation({
     mutationFn: () =>
@@ -367,6 +396,61 @@ export function EmployeeDetailPage() {
     }
   }
 
+  // ── Employee document (contract) handlers ────────────────────────────────────
+
+  async function handleDocUpload() {
+    if (!uploadDocFile) { setUploadDocError('Please select a file.'); return }
+    setIsUploadingDoc(true)
+    setUploadDocError('')
+    try {
+      const formData = new FormData()
+      formData.append('file', uploadDocFile)
+      formData.append('documentType', uploadDocType)
+      if (uploadDocDesc.trim()) formData.append('description', uploadDocDesc.trim())
+      await api.post(
+        `/employees/${id}/documents?companyId=${activeCompanyId}`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      queryClient.invalidateQueries({ queryKey: ['employee-docs', id] })
+      setShowUploadDocForm(false)
+      setUploadDocFile(null)
+      setUploadDocType('EMPLOYMENT_CONTRACT')
+      setUploadDocDesc('')
+      toast({ title: 'Document uploaded' })
+    } catch (err) {
+      setUploadDocError(apiError(err))
+    } finally {
+      setIsUploadingDoc(false)
+    }
+  }
+
+  async function viewEmployeeDoc(docId: string) {
+    try {
+      const { data } = await api.get(`/employees/${id}/documents/${docId}/url?companyId=${activeCompanyId}`)
+      window.open(data.data.url, '_blank', 'noopener,noreferrer')
+    } catch (err) {
+      toast({ title: 'Could not open document', description: apiError(err), variant: 'destructive' })
+    }
+  }
+
+  async function deleteEmployeeDoc(docId: string) {
+    if (!window.confirm('Delete this document? This cannot be undone.')) return
+    try {
+      await api.delete(`/employees/${id}/documents/${docId}?companyId=${activeCompanyId}`)
+      queryClient.invalidateQueries({ queryKey: ['employee-docs', id] })
+      toast({ title: 'Document deleted' })
+    } catch (err) {
+      toast({ title: 'Delete failed', description: apiError(err), variant: 'destructive' })
+    }
+  }
+
+  function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
   if (isLoading) {
     return (
       <div className="flex flex-col gap-0">
@@ -462,6 +546,7 @@ export function EmployeeDetailPage() {
             <TabsTrigger value="bank">Banking</TabsTrigger>
             <TabsTrigger value="portal">Portal Access</TabsTrigger>
             <TabsTrigger value="onboarding">Onboarding</TabsTrigger>
+            <TabsTrigger value="documents">Documents</TabsTrigger>
           </TabsList>
 
           {/* ── Details ── */}
@@ -1188,6 +1273,159 @@ export function EmployeeDetailPage() {
               employeeFirstName={emp.firstName}
               employeeLastName={emp.lastName}
             />
+          </TabsContent>
+
+          {/* ── Documents ── */}
+          <TabsContent value="documents" className="space-y-4">
+            {/* Hidden file input for document uploads */}
+            <input
+              ref={docFileRef}
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp"
+              className="hidden"
+              onChange={e => {
+                const f = e.target.files?.[0]
+                if (f) setUploadDocFile(f)
+                e.target.value = ''
+              }}
+            />
+
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">Employee Documents</CardTitle>
+                  <Button
+                    size="sm"
+                    variant={showUploadDocForm ? 'outline' : 'default'}
+                    onClick={() => {
+                      setShowUploadDocForm(v => !v)
+                      setUploadDocError('')
+                      setUploadDocFile(null)
+                    }}
+                  >
+                    {showUploadDocForm ? <><X className="h-4 w-4 mr-1" />Cancel</> : <><Plus className="h-4 w-4 mr-1" />Upload document</>}
+                  </Button>
+                </div>
+              </CardHeader>
+
+              {showUploadDocForm && (
+                <CardContent className="border-t pt-4 pb-4 bg-muted/30">
+                  <div className="space-y-3 max-w-lg">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label className="text-xs mb-1 block">Document type</Label>
+                        <select
+                          value={uploadDocType}
+                          onChange={e => setUploadDocType(e.target.value)}
+                          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          <option value="EMPLOYMENT_CONTRACT">Employment Contract</option>
+                          <option value="TAX_DECLARATION">Tax Declaration</option>
+                          <option value="BANK_DETAILS">Bank Details</option>
+                          <option value="INDUCTION">Induction</option>
+                          <option value="ENTERPRISE_AGREEMENT">Enterprise Agreement</option>
+                          <option value="INCIDENT_REPORT">Incident Report</option>
+                          <option value="OTHER">Other</option>
+                        </select>
+                      </div>
+                      <div>
+                        <Label className="text-xs mb-1 block">Description (optional)</Label>
+                        <Input
+                          value={uploadDocDesc}
+                          onChange={e => setUploadDocDesc(e.target.value)}
+                          placeholder="e.g. Signed 2024 contract"
+                          className="h-9"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => docFileRef.current?.click()}
+                        className="flex items-center gap-2 text-sm border rounded-md px-3 py-1.5 hover:bg-muted transition-colors"
+                      >
+                        <Paperclip className="h-4 w-4" />
+                        {uploadDocFile ? uploadDocFile.name : 'Choose file…'}
+                      </button>
+                      {uploadDocFile && (
+                        <span className="text-xs text-muted-foreground">{formatFileSize(uploadDocFile.size)}</span>
+                      )}
+                    </div>
+                    {uploadDocError && <p className="text-xs text-destructive">{uploadDocError}</p>}
+                    <Button
+                      size="sm"
+                      disabled={isUploadingDoc}
+                      onClick={handleDocUpload}
+                    >
+                      {isUploadingDoc ? 'Uploading…' : <><Upload className="h-4 w-4 mr-1.5" />Upload</>}
+                    </Button>
+                  </div>
+                </CardContent>
+              )}
+
+              <CardContent className="p-0">
+                {employeeDocs.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground">
+                    No documents uploaded yet. Use the button above to upload employment contracts, tax declarations, and other files.
+                  </div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40">
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Type</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">File</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Description</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Size</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Uploaded</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {employeeDocs.map(doc => (
+                        <tr key={doc.id} className="border-b last:border-0">
+                          <td className="px-4 py-3">
+                            <span className="text-xs font-medium">
+                              {doc.documentType.replace(/_/g, ' ')}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground max-w-[200px] truncate" title={doc.fileName}>
+                            {doc.fileName}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground text-xs">
+                            {doc.description ?? '—'}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap">
+                            {formatFileSize(doc.fileSize)}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap">
+                            {formatDate(doc.createdAt)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => viewEmployeeDoc(doc.id)}
+                                className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium"
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                                View
+                                <ExternalLink className="h-3 w-3" />
+                              </button>
+                              <button
+                                onClick={() => deleteEmployeeDoc(doc.id)}
+                                className="flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 font-medium"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>

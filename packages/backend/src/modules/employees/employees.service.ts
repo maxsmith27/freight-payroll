@@ -2,6 +2,7 @@ import { z } from 'zod'
 import prisma from '../../lib/prisma.js'
 import { NotFoundError, AppError } from '../../middleware/error.middleware.js'
 import { encrypt, decrypt, encryptOptional, decryptOptional } from '../../lib/crypto.js'
+import { uploadFile, deleteFile, getFileUrl } from '../../lib/storage.js'
 
 // ─── Schemas ────────────────────────────────────────────────────────────────
 
@@ -720,4 +721,64 @@ async function initialiseLeaveBalances(employeeId: string) {
     })),
     skipDuplicates: true,
   })
+}
+
+// ─── Employee documents (contracts, etc.) ───────────────────────────────────
+
+export async function listEmployeeDocuments(employeeId: string, companyId: string) {
+  const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId } })
+  if (!employee) throw new NotFoundError('Employee')
+
+  return prisma.employeeDocument.findMany({
+    where: { employeeId },
+    orderBy: { createdAt: 'desc' },
+  })
+}
+
+export async function uploadEmployeeDocument(
+  employeeId: string,
+  companyId: string,
+  file: { buffer: Buffer; originalname: string; mimetype: string; size: number },
+  documentType: string,
+  description: string | undefined,
+  uploadedBy: string,
+) {
+  const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId } })
+  if (!employee) throw new NotFoundError('Employee')
+
+  const ext = file.originalname.split('.').pop()?.toLowerCase() ?? 'bin'
+  const timestamp = Date.now()
+  const key = `employees/${companyId}/${employeeId}/documents/${timestamp}.${ext}`
+
+  await uploadFile({ key, body: file.buffer, contentType: file.mimetype })
+
+  return prisma.employeeDocument.create({
+    data: {
+      employeeId,
+      documentType: documentType as any,
+      fileName: file.originalname,
+      fileKey: key,
+      fileSize: file.size,
+      mimeType: file.mimetype,
+      description: description ?? null,
+      uploadedBy,
+    },
+  })
+}
+
+export async function getEmployeeDocumentUrl(docId: string, employeeId: string, companyId: string) {
+  const doc = await prisma.employeeDocument.findFirst({
+    where: { id: docId, employeeId, employee: { companyId } },
+  })
+  if (!doc) throw new NotFoundError('Document')
+  return getFileUrl(doc.fileKey)
+}
+
+export async function deleteEmployeeDocument(docId: string, employeeId: string, companyId: string) {
+  const doc = await prisma.employeeDocument.findFirst({
+    where: { id: docId, employeeId, employee: { companyId } },
+  })
+  if (!doc) throw new NotFoundError('Document')
+  await deleteFile(doc.fileKey).catch(() => {})
+  await prisma.employeeDocument.delete({ where: { id: docId } })
 }

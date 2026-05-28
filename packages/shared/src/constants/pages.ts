@@ -8,6 +8,7 @@ export const ESS_PAGES = {
   KM_LOG:     'ess.km_log',
   LEAVE:      'ess.leave',
   PAYSLIPS:   'ess.payslips',
+  DOCUMENTS:  'ess.documents',
 } as const
 
 export const ADMIN_PAGES = {
@@ -58,7 +59,7 @@ export const ROLE_DEFAULT_PAGES: Record<CompanyRole, PageKey[]> = {
     ADMIN_PAGES.ROSTER,
     ADMIN_PAGES.COMPLIANCE,
   ],
-  EMPLOYEE: ALL_ESS,
+  EMPLOYEE: [...ALL_ESS],
 }
 
 // ─── Human-readable labels for the admin UI ──────────────────────────────────
@@ -69,6 +70,7 @@ export const PAGE_LABELS: Record<PageKey, string> = {
   'ess.km_log':             'KM Log',
   'ess.leave':              'Leave',
   'ess.payslips':           'Payslips',
+  'ess.documents':          'My Documents',
   'admin.dashboard':        'Dashboard',
   'admin.employees':        'Employees',
   'admin.payroll':          'Payroll',

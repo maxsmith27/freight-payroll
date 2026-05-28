@@ -1,5 +1,5 @@
 import { Outlet, Navigate, NavLink, useNavigate } from 'react-router-dom'
-import { Truck, LayoutDashboard, Clock, MapPin, Calendar, FileText, LogOut, User, CreditCard } from 'lucide-react'
+import { Truck, LayoutDashboard, Clock, MapPin, Calendar, FileText, LogOut, User, CreditCard, FolderOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth.store'
 import { usePageEnabled } from '@/lib/roles'
@@ -16,6 +16,7 @@ const allNavItems = [
   { to: '/employee/km-log',        label: 'KM Log',        icon: MapPin,          pageKey: ESS_PAGES.KM_LOG     as EssPageKey },
   { to: '/employee/leave',         label: 'Leave',         icon: Calendar,        pageKey: ESS_PAGES.LEAVE      as EssPageKey },
   { to: '/employee/payslips',      label: 'Payslips',      icon: FileText,        pageKey: ESS_PAGES.PAYSLIPS   as EssPageKey },
+  { to: '/employee/documents',     label: 'My Documents',  icon: FolderOpen,      pageKey: ESS_PAGES.DOCUMENTS  as EssPageKey },
 ]
 
 export function EmployeePortalLayout() {

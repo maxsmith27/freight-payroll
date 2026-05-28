@@ -24,6 +24,7 @@ import { EmployeeTimesheets } from '@/pages/employee/EmployeeTimesheets'
 import { EmployeeKmLog } from '@/pages/employee/EmployeeKmLog'
 import { EmployeeLeave } from '@/pages/employee/EmployeeLeave'
 import { EmployeePayslips } from '@/pages/employee/EmployeePayslips'
+import { EmployeeDocuments } from '@/pages/employee/EmployeeDocuments'
 import { EmployeeProfile } from '@/pages/employee/EmployeeProfile'
 import { EmployeeBankAccounts } from '@/pages/employee/EmployeeBankAccounts'
 import { OnboardingPage } from '@/pages/onboarding/OnboardingPage'
@@ -63,6 +64,7 @@ const router = createBrowserRouter([
       { path: 'km-log',           element: <EmployeeKmLog /> },
       { path: 'leave',            element: <EmployeeLeave /> },
       { path: 'payslips',         element: <EmployeePayslips /> },
+      { path: 'documents',         element: <EmployeeDocuments /> },
     ],
   },
 

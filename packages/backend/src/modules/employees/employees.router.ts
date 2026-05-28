@@ -1,10 +1,20 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
+import multer from 'multer'
 import { authenticate, requireCompanyAccess, getDepotScope } from '../../middleware/auth.middleware.js'
 import { validateBody, validateQuery } from '../../middleware/validate.middleware.js'
 import * as service from './employees.service.js'
 import { writeAuditLog } from '../../middleware/audit.middleware.js'
 import prisma from '../../lib/prisma.js'
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB — contracts can be large
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+    cb(null, allowed.includes(file.mimetype))
+  },
+})
 
 export const employeesRouter = Router()
 employeesRouter.use(authenticate)
@@ -269,5 +279,70 @@ employeesRouter.post('/import', payrollAccess, async (req: Request, res: Respons
       newValues: { rowCount: rows.length, created: result.created, errors: result.errors?.length ?? 0 },
     })
     res.json({ success: true, data: result })
+  } catch (err) { next(err) }
+})
+
+// ─── Employee documents (contracts, etc.) ────────────────────────────────────
+
+employeesRouter.get('/:id/documents', payrollAccess, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { companyId } = createQuerySchema.parse(req.query)
+    const docs = await service.listEmployeeDocuments(req.params.id, companyId)
+    res.json({ success: true, data: docs })
+  } catch (err) { next(err) }
+})
+
+employeesRouter.post(
+  '/:id/documents',
+  payrollAccess,
+  upload.single('file'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { companyId } = createQuerySchema.parse(req.query)
+      if (!req.file) {
+        res.status(400).json({ success: false, error: 'No file provided. Accepted: PDF, JPEG, PNG, WEBP (max 20 MB).' })
+        return
+      }
+      const { documentType, description } = z.object({
+        documentType: z.string().min(1),
+        description: z.string().optional(),
+      }).parse(req.body)
+
+      const doc = await service.uploadEmployeeDocument(
+        req.params.id, companyId, req.file, documentType, description, req.user!.id,
+      )
+      await writeAuditLog(req, {
+        action: 'CREATE',
+        entityType: 'EmployeeDocument',
+        entityId: doc.id,
+        companyId,
+        employeeId: req.params.id,
+        newValues: { documentType: doc.documentType, fileName: doc.fileName },
+      })
+      res.status(201).json({ success: true, data: doc })
+    } catch (err) { next(err) }
+  },
+)
+
+employeesRouter.get('/:id/documents/:docId/url', payrollAccess, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { companyId } = createQuerySchema.parse(req.query)
+    const url = await service.getEmployeeDocumentUrl(req.params.docId, req.params.id, companyId)
+    res.json({ success: true, data: { url } })
+  } catch (err) { next(err) }
+})
+
+employeesRouter.delete('/:id/documents/:docId', payrollAccess, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { companyId } = createQuerySchema.parse(req.query)
+    await service.deleteEmployeeDocument(req.params.docId, req.params.id, companyId)
+    await writeAuditLog(req, {
+      action: 'DELETE',
+      entityType: 'EmployeeDocument',
+      entityId: req.params.docId,
+      companyId,
+      employeeId: req.params.id,
+    })
+    res.json({ success: true })
   } catch (err) { next(err) }
 })

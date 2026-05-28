@@ -559,3 +559,65 @@ export async function deleteMyBankAccount(accountId: string, employeeId: string)
   await prisma.bankAccount.delete({ where: { id: accountId } })
   return { deleted: true }
 }
+
+// ─── Compliance documents ────────────────────────────────────────────────────
+
+export async function getMyComplianceDocs(employeeId: string) {
+  const [licences, accreditations, medicals] = await Promise.all([
+    prisma.driverLicence.findMany({
+      where: { employeeId, isActive: true },
+      orderBy: { expiryDate: 'asc' },
+      select: {
+        id: true, licenceNumber: true, licenceState: true, licenceClasses: true,
+        issueDate: true, expiryDate: true, documentKey: true,
+      },
+    }),
+    prisma.accreditation.findMany({
+      where: { employeeId, isActive: true },
+      orderBy: { expiryDate: 'asc' },
+      select: {
+        id: true, accreditationType: true, certificateNumber: true,
+        issueDate: true, expiryDate: true, documentKey: true,
+      },
+    }),
+    prisma.medicalCertificate.findMany({
+      where: { employeeId, isActive: true },
+      orderBy: { expiryDate: 'asc' },
+      select: {
+        id: true, certType: true, issueDate: true, expiryDate: true,
+        restrictions: true, documentKey: true,
+      },
+    }),
+  ])
+  return { licences, accreditations, medicals }
+}
+
+export async function verifyComplianceDocOwnership(
+  docType: 'licence' | 'accreditation' | 'medical',
+  docId: string,
+  employeeId: string,
+): Promise<{ companyId: string } | null> {
+  switch (docType) {
+    case 'licence': {
+      const r = await prisma.driverLicence.findFirst({
+        where: { id: docId, employeeId },
+        select: { employee: { select: { companyId: true } } },
+      })
+      return r ? { companyId: r.employee.companyId } : null
+    }
+    case 'accreditation': {
+      const r = await prisma.accreditation.findFirst({
+        where: { id: docId, employeeId },
+        select: { employee: { select: { companyId: true } } },
+      })
+      return r ? { companyId: r.employee.companyId } : null
+    }
+    case 'medical': {
+      const r = await prisma.medicalCertificate.findFirst({
+        where: { id: docId, employeeId },
+        select: { employee: { select: { companyId: true } } },
+      })
+      return r ? { companyId: r.employee.companyId } : null
+    }
+  }
+}

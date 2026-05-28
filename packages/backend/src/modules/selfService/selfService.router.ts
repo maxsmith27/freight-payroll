@@ -5,6 +5,7 @@ import { validateBody, validateQuery } from '../../middleware/validate.middlewar
 import * as service from './selfService.service.js'
 import { AppError } from '../../middleware/error.middleware.js'
 import prisma from '../../lib/prisma.js'
+import { getComplianceDocumentUrl } from '../compliance/compliance.service.js'
 
 export const selfServiceRouter = Router()
 selfServiceRouter.use(authenticate)
@@ -235,5 +236,37 @@ selfServiceRouter.delete('/bank-accounts/:id', async (req: Request, res: Respons
     const employeeId = await resolveEmployee(req)
     await service.deleteMyBankAccount(req.params.id, employeeId)
     res.json({ success: true })
+  } catch (err) { next(err) }
+})
+
+// ─── Compliance documents (employee view own licences / certs) ───────────────
+
+selfServiceRouter.get('/compliance', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const employeeId = await resolveEmployee(req)
+    const data = await service.getMyComplianceDocs(employeeId)
+    res.json({ success: true, data })
+  } catch (err) { next(err) }
+})
+
+// Returns a signed URL so the employee can view their own attached document.
+// The docType + docId are verified to belong to the resolved employeeId.
+selfServiceRouter.get('/compliance/documents/:docType/:docId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const employeeId = await resolveEmployee(req)
+    const docType = z.enum(['licence', 'accreditation', 'medical']).parse(req.params.docType)
+    const { docId } = req.params
+
+    // Verify the record belongs to this employee before issuing a URL
+    const owned = await service.verifyComplianceDocOwnership(docType, docId, employeeId)
+    if (!owned) {
+      res.status(403).json({ success: false, error: 'Access denied' })
+      return
+    }
+
+    // companyId is not needed here — ownership is verified by employeeId above.
+    // We pass a dummy value and let the service query by docId directly.
+    const url = await getComplianceDocumentUrl(docType, docId, owned.companyId)
+    res.json({ success: true, data: { url } })
   } catch (err) { next(err) }
 })
