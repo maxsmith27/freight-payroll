@@ -77,6 +77,13 @@ api.interceptors.response.use(
 
 export function apiError(err: unknown): string {
   if (axios.isAxiosError(err)) {
+    // 405 from Render's edge means the backend is waking up from sleep.
+    // The HTML error page Render returns has no JSON body, so err.response?.data
+    // is either empty or an HTML string — neither is useful to show the user.
+    if (err.response?.status === 405 || (!err.response && err.message.includes('Network Error'))) {
+      return 'The server is starting up after a period of inactivity. Please wait 30–60 seconds and try again.'
+    }
+
     const data = err.response?.data
     if (!data) return err.message
     const message: string = data.error ?? err.message

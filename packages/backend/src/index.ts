@@ -36,15 +36,30 @@ function scheduleDailyComplianceAlerts() {
 // ─── Keep-alive ping ─────────────────────────────────────────────────────────
 // Render's free tier spins down services after 15 minutes of inactivity,
 // returning 405 on the next POST request before the service wakes up.
-// Pinging /health every 10 minutes keeps the service warm at no cost.
+//
+// IMPORTANT: the ping MUST use the external URL, not localhost.
+// Render tracks activity via its edge network — localhost requests are
+// internal socket calls that never touch Render's infrastructure, so they
+// don't reset the inactivity timer and the service still sleeps.
+//
+// Render automatically injects RENDER_EXTERNAL_URL for all web services.
+// We ping /health every 10 minutes via that URL so Render sees live traffic.
 function keepAlive() {
-  const url = `http://localhost:${config.PORT}/health`
+  const url = config.RENDER_EXTERNAL_URL
+    ? `${config.RENDER_EXTERNAL_URL}/health`
+    : `http://localhost:${config.PORT}/health` // fallback: local dev only
+
+  if (!config.RENDER_EXTERNAL_URL) {
+    logger.warn('RENDER_EXTERNAL_URL not set — keep-alive will use localhost (ineffective on Render free tier)')
+  }
+
   setInterval(() => {
-    fetch(url).catch(() => {
-      // Swallow errors — if the server is mid-restart this will fail harmlessly
+    fetch(url).catch(err => {
+      logger.warn('Keep-alive ping failed', { url, error: String(err) })
     })
   }, 10 * 60 * 1000) // every 10 minutes
-  logger.info('Keep-alive ping enabled (every 10 min)')
+
+  logger.info(`Keep-alive ping enabled — target: ${url}`)
 }
 
 async function main() {

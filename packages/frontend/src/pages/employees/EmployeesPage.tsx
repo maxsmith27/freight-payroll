@@ -203,7 +203,7 @@ export function EmployeesPage() {
     setImportStep('idle')
   }
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['employees', activeCompanyId, search, employmentType, awardCode],
     queryFn: async () => {
       const params = new URLSearchParams({ companyId: activeCompanyId!, page: '1', pageSize: '50' })
@@ -404,6 +404,19 @@ export function EmployeesPage() {
           <CardContent className="p-0">
             {isLoading ? (
               <div className="p-8 text-center text-sm text-muted-foreground">Loading employees…</div>
+            ) : isError ? (
+              <div className="p-8 text-center space-y-3">
+                <p className="text-sm font-medium text-destructive">Could not load employees</p>
+                <p className="text-xs text-muted-foreground">
+                  The server may be starting up after a period of inactivity. This usually takes 30–60 seconds.
+                </p>
+                <button
+                  onClick={() => refetch()}
+                  className="text-xs text-primary underline hover:no-underline"
+                >
+                  Try again
+                </button>
+              </div>
             ) : employees.length === 0 ? (
               <div className="p-8 text-center text-sm text-muted-foreground">
                 No employees found.{' '}

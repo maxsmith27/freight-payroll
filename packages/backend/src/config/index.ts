@@ -37,6 +37,11 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
 
   SENTRY_DSN: z.string().optional(),
+
+  // Automatically set by Render for all web services — the public HTTPS URL
+  // of this service. Used by the keep-alive ping so it goes through Render's
+  // edge network (localhost pings are internal and don't count as activity).
+  RENDER_EXTERNAL_URL: z.string().optional(),
 })
 
 function parseEnv() {
