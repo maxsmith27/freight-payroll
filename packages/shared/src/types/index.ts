@@ -24,6 +24,11 @@ export type AwardClassificationLevel =
   | 'GRADE_3'
   | 'GRADE_4'
   | 'GRADE_5'
+  | 'GRADE_6'
+  | 'GRADE_7'
+  | 'GRADE_8'
+  | 'GRADE_9'
+  | 'GRADE_10'
 
 export type VehicleGrade =
   | 'LIGHT_RIGID'
@@ -47,9 +52,11 @@ export type EarningType =
   | 'PUBLIC_HOLIDAY'
   | 'NIGHT_PENALTY'
   | 'WEEKEND_PENALTY'
+  | 'AFTERNOON_PENALTY'
   | 'EARLY_MORNING_PENALTY'
   | 'PER_KM'
   | 'PER_LOAD'
+  | 'AWARD_FLOOR_TOPUP'
   | 'ANNUAL_LEAVE'
   | 'ANNUAL_LEAVE_LOADING'
   | 'PERSONAL_LEAVE'

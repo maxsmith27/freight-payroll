@@ -1,252 +1,132 @@
 // ─────────────────────────────────────────────────────────────────
-// Award interpretation engine
-// Applies the Road Transport Awards to produce earning lines
-// from raw hours worked per day.
+// Award Engine — Orchestrator
+//
+// Entry point for processing a single employee's pay week.
+// Responsibilities:
+//   1. Load the AwardRateContext from the database via rateLoader
+//   2. Route to the correct pure calculation engine (MA000038/MA000039)
+//   3. Run the km pay floor check if the employee is km-paid
+//   4. Calculate allowances from the pre-loaded allowance rates
+//
+// The underlying engines (ma000038.engine.ts, ma000039.engine.ts,
+// allowance.engine.ts, kmFloorChecker.ts) are pure functions with
+// no DB dependencies — they can be tested in isolation with mocked
+// AwardRateContext objects.
+//
+// For Phase 4, payroll.service.ts will call processEmployeePayWeek()
+// to replace the current naive earnings calculation.
 // ─────────────────────────────────────────────────────────────────
 
-import {
-  PENALTY_RATES,
-  getAwardHourlyRate,
-} from '@freight-payroll/shared'
-import { isPublicHoliday } from '@freight-payroll/shared'
+import { loadRateContext } from './rateLoader.js'
+import { processMA000038Week } from './ma000038.engine.js'
+import { processMA000039Week } from './ma000039.engine.js'
+import { calculateAllowances } from './allowance.engine.js'
+import { checkKmFloor, buildKmFloorTopUpLine } from './kmFloorChecker.js'
 import type {
-  AwardCode,
-  AwardClassificationLevel,
-  AustralianState,
-  EarningType,
-} from '@freight-payroll/shared'
+  DayInput,
+  EmployeeEngineInput,
+  RequestedAllowance,
+  WeeklyAwardResult,
+  AllowanceLine,
+  KmFloorResult,
+  AwardRateContext,
+  EmployeePayWeekResult,
+} from './types.js'
 
-export interface DayHours {
-  date: Date
-  startTime: Date
-  endTime: Date
-  breakMinutes: number
-  depotState: AustralianState
+// Re-export engine types for consumers who only import from award.engine
+export type {
+  DayInput,
+  EmployeeEngineInput,
+  RequestedAllowance,
+  WeeklyAwardResult,
+  AllowanceLine,
+  KmFloorResult,
+  AwardRateContext,
+  EmployeePayWeekResult,
 }
 
-export interface EarningLine {
-  earningType: EarningType
-  description: string
-  hours: number
-  rate: number
-  amount: number
-}
-
-export interface WeeklyEarnings {
-  lines: EarningLine[]
-  totalOrdinaryHours: number
-  totalOvertimeHours: number
-  totalGross: number
-}
+// Re-export pure engine functions for consumers who want to call them directly
+// (e.g., in tests, or when the context has already been loaded)
+export { processMA000038Week, processMA000039Week, calculateAllowances, checkKmFloor }
+export { loadRateContext }
 
 /**
- * Process a week of time entries and produce award-compliant earning lines.
+ * Process a single employee's pay week end-to-end.
  *
- * MA000038/MA000039 overtime rules:
- * - Overtime after 38 hours in a week (on a roster cycle basis)
- * - Or after 7.6 hours in a day (daily OT)
- * - Time and a half for first 3 hours of OT, double time after
- * - Double time on Sundays
- * - 2.5x on public holidays
- * - 1.5x for Saturday ordinary time
- * - 15% night shift penalty when majority of hours between 0000-0600
+ * Loads rate context from DB, routes to the correct award engine,
+ * runs the km floor check (if applicable), and calculates allowances.
+ *
+ * @param params.days               - Timesheet day inputs for the week.
+ * @param params.emp                - Employee configuration (award, grade, rate, etc.)
+ * @param params.requestedAllowances - Allowances to apply this period (with quantities).
+ * @param params.periodEnd          - Last date of the pay period (for rate + PH lookups).
+ *
+ * @throws If no award base rate is found for the employee's grade at the period date.
  */
-export function processWeeklyHours(
-  days: DayHours[],
-  awardCode: AwardCode,
-  classificationLevel: AwardClassificationLevel,
-  baseHourlyRate?: number, // override award rate if employee has a custom rate above award
-): WeeklyEarnings {
-  const baseRate = baseHourlyRate ?? getAwardHourlyRate(awardCode, classificationLevel)
-  const lines: EarningLine[] = []
+export async function processEmployeePayWeek(params: {
+  days: DayInput[]
+  emp: EmployeeEngineInput
+  requestedAllowances?: RequestedAllowance[]
+  periodEnd: Date
+}): Promise<EmployeePayWeekResult> {
+  const { days, emp, requestedAllowances = [], periodEnd } = params
 
-  let weeklyOrdinaryHours = 0
-  let weeklyOvertimeHours = 0
+  // ── 1. Load rate context from DB ────────────────────────────────────────────
+  const ctx = await loadRateContext(
+    emp.awardCode,
+    emp.classificationLevel,
+    emp.hourlyRate,
+    emp.state,
+    emp.periodStart,
+    periodEnd,
+  )
 
-  for (const day of days) {
-    const dayOfWeek = day.date.getDay() // 0=Sun, 6=Sat
-    const isPublicHol = isPublicHoliday(day.date, day.depotState)
-    const isSunday = dayOfWeek === 0
-    const isSaturday = dayOfWeek === 6
+  // ── 2. Calculate earnings via the correct award engine ──────────────────────
+  let earnings: WeeklyAwardResult
+  if (emp.awardCode === 'MA000039') {
+    earnings = processMA000039Week(days, emp, ctx)
+  } else {
+    // MA000038 is the default / fallback
+    earnings = processMA000038Week(days, emp, ctx)
+  }
 
-    // Gross worked hours (excluding unpaid breaks)
-    const grossMinutes =
-      (day.endTime.getTime() - day.startTime.getTime()) / 60000 - day.breakMinutes
-    const grossHours = Math.max(0, grossMinutes / 60)
+  // ── 3. Km pay floor check ────────────────────────────────────────────────────
+  let kmFloor: KmFloorResult | null = null
 
-    // Minimum engagement applies — minimum 3 hours
-    const payableHours = Math.max(grossHours, grossHours > 0 ? 3 : 0)
+  if (emp.ratePerKm != null && emp.ratePerKm > 0) {
+    const totalKmDriven = days.reduce((sum, d) => sum + (d.kmDriven ?? 0), 0)
+    const totalHoursWorked = earnings.totalOrdinaryHours + earnings.totalOvertimeHours
 
-    const dateStr = day.date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })
-
-    if (isPublicHol) {
-      // All hours at 2.5x
-      const rate = roundRate(baseRate * PENALTY_RATES.overtime_public_holiday)
-      lines.push({
-        earningType: 'PUBLIC_HOLIDAY',
-        description: `Public Holiday — ${dateStr}`,
-        hours: payableHours,
-        rate,
-        amount: roundCurrency(payableHours * rate),
-      })
-      // Public holiday hours don't count toward the 38hr weekly threshold
-      continue
-    }
-
-    if (isSunday) {
-      // All hours at 2x (double time)
-      const rate = roundRate(baseRate * PENALTY_RATES.sunday_ordinary)
-      lines.push({
-        earningType: 'WEEKEND_PENALTY',
-        description: `Sunday — ${dateStr}`,
-        hours: payableHours,
-        rate,
-        amount: roundCurrency(payableHours * rate),
-      })
-      weeklyOrdinaryHours += payableHours
-      continue
-    }
-
-    if (isSaturday) {
-      // Saturday ordinary time at 1.5x (per MA000038)
-      const ordinarySaturdayHours = Math.min(payableHours, PENALTY_RATES.ordinary_hours_per_day)
-      const overtimeSaturdayHours = Math.max(0, payableHours - ordinarySaturdayHours)
-
-      if (ordinarySaturdayHours > 0) {
-        const rate = roundRate(baseRate * PENALTY_RATES.saturday_ordinary)
-        lines.push({
-          earningType: 'WEEKEND_PENALTY',
-          description: `Saturday — ${dateStr}`,
-          hours: ordinarySaturdayHours,
-          rate,
-          amount: roundCurrency(ordinarySaturdayHours * rate),
-        })
-        weeklyOrdinaryHours += ordinarySaturdayHours
-      }
-
-      if (overtimeSaturdayHours > 0) {
-        const rate = roundRate(baseRate * PENALTY_RATES.overtime_after_3_hours)
-        lines.push({
-          earningType: 'OVERTIME_2X',
-          description: `Saturday Overtime — ${dateStr}`,
-          hours: overtimeSaturdayHours,
-          rate,
-          amount: roundCurrency(overtimeSaturdayHours * rate),
-        })
-        weeklyOvertimeHours += overtimeSaturdayHours
-      }
-      continue
-    }
-
-    // Monday–Friday
-    // Daily overtime: first 7.6 hours at ordinary, then OT
-    const dailyOrdinaryHours = Math.min(payableHours, PENALTY_RATES.ordinary_hours_per_day)
-    const dailyOvertimeHours = Math.max(0, payableHours - PENALTY_RATES.ordinary_hours_per_day)
-
-    // Check night shift: does the majority of work fall between 0000–0600?
-    const isNightShift = isNightShiftWork(day.startTime, day.endTime)
-
-    const ordinaryRate = isNightShift
-      ? roundRate(baseRate * (1 + PENALTY_RATES.night_shift_allowance_pct))
-      : baseRate
-
-    if (dailyOrdinaryHours > 0) {
-      const remainingBeforeWeeklyOT = Math.max(
-        0,
-        PENALTY_RATES.ordinary_hours_per_week - weeklyOrdinaryHours,
+    if (totalKmDriven > 0 || totalHoursWorked > 0) {
+      kmFloor = checkKmFloor(
+        totalKmDriven,
+        emp.ratePerKm,
+        totalHoursWorked,
+        ctx.awardMinimumHourlyRate,
       )
-      const trulyOrdinaryHours = Math.min(dailyOrdinaryHours, remainingBeforeWeeklyOT)
-      const weeklyOTHours = dailyOrdinaryHours - trulyOrdinaryHours
 
-      if (trulyOrdinaryHours > 0) {
-        lines.push({
-          earningType: isNightShift ? 'NIGHT_PENALTY' : 'ORDINARY',
-          description: isNightShift ? `Night Shift — ${dateStr}` : `Ordinary — ${dateStr}`,
-          hours: trulyOrdinaryHours,
-          rate: ordinaryRate,
-          amount: roundCurrency(trulyOrdinaryHours * ordinaryRate),
-        })
-        weeklyOrdinaryHours += trulyOrdinaryHours
-      }
-
-      if (weeklyOTHours > 0) {
-        // These daily hours push us over 38 for the week
-        const rate = roundRate(baseRate * PENALTY_RATES.overtime_first_3_hours)
-        lines.push({
-          earningType: 'OVERTIME_1_5X',
-          description: `Weekly OT (1.5x) — ${dateStr}`,
-          hours: weeklyOTHours,
-          rate,
-          amount: roundCurrency(weeklyOTHours * rate),
-        })
-        weeklyOvertimeHours += weeklyOTHours
-      }
-    }
-
-    if (dailyOvertimeHours > 0) {
-      // Daily overtime: first 3 hours at 1.5x, then 2x
-      const otFirst3 = Math.min(dailyOvertimeHours, 3)
-      const otAfter3 = Math.max(0, dailyOvertimeHours - 3)
-
-      if (otFirst3 > 0) {
-        const rate = roundRate(baseRate * PENALTY_RATES.overtime_first_3_hours)
-        lines.push({
-          earningType: 'OVERTIME_1_5X',
-          description: `Overtime (1.5x) — ${dateStr}`,
-          hours: otFirst3,
-          rate,
-          amount: roundCurrency(otFirst3 * rate),
-        })
-        weeklyOvertimeHours += otFirst3
-      }
-
-      if (otAfter3 > 0) {
-        const rate = roundRate(baseRate * PENALTY_RATES.overtime_after_3_hours)
-        lines.push({
-          earningType: 'OVERTIME_2X',
-          description: `Overtime (2x) — ${dateStr}`,
-          hours: otAfter3,
-          rate,
-          amount: roundCurrency(otAfter3 * rate),
-        })
-        weeklyOvertimeHours += otAfter3
+      // If a top-up is required, inject it as an earning line
+      if (kmFloor.topUpAmount > 0) {
+        const topUpLine = buildKmFloorTopUpLine(kmFloor, ctx.awardMinimumHourlyRate)
+        if (topUpLine) {
+          earnings = {
+            ...earnings,
+            lines: [...earnings.lines, topUpLine],
+            totalGross: Math.round((earnings.totalGross + kmFloor.topUpAmount) * 100) / 100,
+            // Top-up is NOT OTE — do not add to totalOTE
+          }
+        }
       }
     }
   }
 
-  const totalGross = lines.reduce((sum, l) => sum + l.amount, 0)
+  // ── 4. Calculate allowances ──────────────────────────────────────────────────
+  const allowances = calculateAllowances(requestedAllowances, ctx.allowanceRates)
 
   return {
-    lines,
-    totalOrdinaryHours: roundRate(weeklyOrdinaryHours),
-    totalOvertimeHours: roundRate(weeklyOvertimeHours),
-    totalGross: roundCurrency(totalGross),
+    earnings,
+    allowances,
+    kmFloor,
+    context: ctx,
   }
-}
-
-/**
- * Determine if a shift is a night shift.
- * Night shift: majority of hours (>50%) fall between midnight and 0600.
- */
-function isNightShiftWork(startTime: Date, endTime: Date): boolean {
-  const start = startTime.getHours() * 60 + startTime.getMinutes()
-  const end = endTime.getHours() * 60 + endTime.getMinutes()
-  const totalMinutes = end - start
-
-  // Minutes in the 0000–0600 window
-  const nightStart = 0
-  const nightEnd = 360 // 6am
-
-  const nightMinutes =
-    Math.min(end, nightEnd) - Math.max(start, nightStart)
-
-  return nightMinutes > totalMinutes / 2
-}
-
-function roundCurrency(value: number): number {
-  return Math.round(value * 100) / 100
-}
-
-function roundRate(value: number): number {
-  return Math.round(value * 10000) / 10000
 }
