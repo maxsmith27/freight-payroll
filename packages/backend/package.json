@@ -12,7 +12,8 @@
     "prisma": "prisma",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "calc": "tsx scripts/award-calc.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1048.0",
