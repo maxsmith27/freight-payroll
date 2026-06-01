@@ -17,6 +17,8 @@ import {
 import type { AwardCode, AwardClassificationLevel, AustralianState } from '@freight-payroll/shared'
 import type { AwardRateContext, LoadedAllowanceRate } from './types.js'
 
+type AwardClassificationLevelStr = AwardClassificationLevel
+
 /**
  * Load all rates needed to process a pay week for an employee.
  *
@@ -143,6 +145,27 @@ export async function loadRateContext(
     }
   }
 
+  // ── All classification rates for this award ───────────────────────────────
+  // Loaded so the higher duties handler can look up the elevated grade's rate
+  // without an additional DB query per-day.
+  const allClassRates = await prisma.awardBaseRate.findMany({
+    where: {
+      award: awardCode,
+      vehicleGrade: null,
+      effectiveFrom: { lte: periodStart },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gte: periodStart } }],
+    },
+    orderBy: { effectiveFrom: 'desc' },
+  })
+
+  const classificationRates = new Map<AwardClassificationLevelStr, number>()
+  for (const rate of allClassRates) {
+    const level = rate.classificationLevel as AwardClassificationLevelStr
+    if (!classificationRates.has(level)) {
+      classificationRates.set(level, Number(rate.hourlyRate))
+    }
+  }
+
   return {
     baseHourlyRate: effectiveHourlyRate,
     awardMinimumHourlyRate,
@@ -151,5 +174,6 @@ export async function loadRateContext(
     ordinaryHoursPerWeek: awardCode === 'MA000039' ? MA000039_ORDINARY_HOURS_PER_WEEK : ORDINARY_HOURS_PER_WEEK,
     ordinaryHoursPerDay:  awardCode === 'MA000039' ? MA000039_ORDINARY_HOURS_PER_WEEK / 5 : ORDINARY_HOURS_PER_DAY,
     allowanceRates: allowanceMap,
+    classificationRates,
   }
 }

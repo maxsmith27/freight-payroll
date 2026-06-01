@@ -85,17 +85,7 @@ export function processMA000039Week(
 ): WeeklyAwardResult {
   const lines: EarningLine[] = []
 
-  let baseRate = ctx.baseHourlyRate
-
-  if (emp.dateOfBirth) {
-    const age = ageAtDate(emp.dateOfBirth, emp.periodStart)
-    baseRate = r(baseRate * getJuniorRateMultiplier(age))
-  }
-
   const isCasual = emp.employmentType === 'CASUAL'
-  if (isCasual) {
-    baseRate = r(baseRate * (1 + CASUAL_LOADING))
-  }
 
   let weeklyOrdinaryAccumulated = 0
   let totalOrdinaryHours = 0
@@ -111,13 +101,45 @@ export function processMA000039Week(
     const rawHours = grossHoursWorked(day.startTime, day.endTime, day.breakMinutes)
     if (rawHours <= 0) continue
 
+    // ── Per-day effective base rate ───────────────────────────────────────────
+    // Computed inside the loop so junior rates split at the birthday mid-period,
+    // and higher duties elevate the rate for individual days.
+
+    let dayBaseRate = ctx.baseHourlyRate
+
+    // 1. Junior rate — use age on THIS day so a birthday mid-week splits correctly.
+    let juniorMultiplier = 1.0
+    if (emp.dateOfBirth) {
+      const age = ageAtDate(emp.dateOfBirth, day.date)
+      juniorMultiplier = getJuniorRateMultiplier(age)
+      dayBaseRate = r(dayBaseRate * juniorMultiplier)
+    }
+
+    // 2. Higher duties — if the employee performed duties above their grade for
+    //    the whole day (>2hrs at higher grade triggers whole-day elevation per award),
+    //    elevate to the award minimum for the higher grade × any junior multiplier.
+    if (day.isHigherDutyDay && day.higherDutyGrade) {
+      const higherGradeMin = ctx.classificationRates.get(day.higherDutyGrade)
+      if (higherGradeMin !== undefined) {
+        const higherEffective = r(higherGradeMin * juniorMultiplier)
+        if (higherEffective > dayBaseRate) {
+          dayBaseRate = higherEffective
+        }
+      }
+    }
+
+    // 3. Casual loading — applied after junior/higher-duties so it stacks correctly.
+    if (isCasual) {
+      dayBaseRate = r(dayBaseRate * (1 + CASUAL_LOADING))
+    }
+
     const minHours = MINIMUM_ENGAGEMENT_HOURS[emp.employmentType as keyof typeof MINIMUM_ENGAGEMENT_HOURS] ?? 0
     const effectiveHours = Math.max(rawHours, minHours)
 
     const dateLabel = day.date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })
 
     if (isPH) {
-      const rate   = r(baseRate * ctx.penaltyRates.publicHoliday)
+      const rate   = r(dayBaseRate * ctx.penaltyRates.publicHoliday)
       lines.push({
         earningType: 'PUBLIC_HOLIDAY',
         description: `Public holiday — ${dateLabel}`,
@@ -138,7 +160,7 @@ export function processMA000039Week(
       const weekOT    = effectiveHours - ordinary
 
       if (ordinary > 0) {
-        const rate = r(baseRate * ctx.penaltyRates.sundayAll)
+        const rate = r(dayBaseRate * ctx.penaltyRates.sundayAll)
         lines.push({
           earningType: 'WEEKEND_PENALTY',
           description: `Sunday — ${dateLabel}`,
@@ -151,7 +173,7 @@ export function processMA000039Week(
         totalOrdinaryHours += ordinary
       }
       if (weekOT > 0) {
-        const rate = r(baseRate * ctx.penaltyRates.sundayAll)
+        const rate = r(dayBaseRate * ctx.penaltyRates.sundayAll)
         lines.push({
           earningType: 'OVERTIME_2X',
           description: `Sunday overtime — ${dateLabel}`,
@@ -172,7 +194,7 @@ export function processMA000039Week(
       const satOT       = effectiveHours - satOrdinary
 
       if (satOrdinary > 0) {
-        const rate = r(baseRate * ctx.penaltyRates.saturdayOrdinary)
+        const rate = r(dayBaseRate * ctx.penaltyRates.saturdayOrdinary)
         lines.push({
           earningType: 'WEEKEND_PENALTY',
           description: `Saturday — ${dateLabel}`,
@@ -185,7 +207,7 @@ export function processMA000039Week(
         totalOrdinaryHours += satOrdinary
       }
       if (satOT > 0) {
-        const rate = r(baseRate * ctx.penaltyRates.saturdayOvertime)
+        const rate = r(dayBaseRate * ctx.penaltyRates.saturdayOvertime)
         lines.push({
           earningType: 'OVERTIME_2X',
           description: `Saturday overtime — ${dateLabel}`,
@@ -221,7 +243,7 @@ export function processMA000039Week(
           : 'ORDINARY'
 
     if (trulyOrdinary > 0) {
-      const rate = r(baseRate * (1 + penaltyLoading))
+      const rate = r(dayBaseRate * (1 + penaltyLoading))
       lines.push({
         earningType,
         description: penaltyLoading > 0
@@ -241,7 +263,7 @@ export function processMA000039Week(
       const ot2 = Math.max(0, totalDayOT - 2)
 
       if (ot1 > 0) {
-        const rate = r(baseRate * ctx.penaltyRates.overtimeFirst2Hours)
+        const rate = r(dayBaseRate * ctx.penaltyRates.overtimeFirst2Hours)
         lines.push({
           earningType: 'OVERTIME_1_5X',
           description: `Overtime (1.5×) — ${dateLabel}`,
@@ -252,7 +274,7 @@ export function processMA000039Week(
         })
       }
       if (ot2 > 0) {
-        const rate = r(baseRate * ctx.penaltyRates.overtimeAfter2Hours)
+        const rate = r(dayBaseRate * ctx.penaltyRates.overtimeAfter2Hours)
         lines.push({
           earningType: 'OVERTIME_2X',
           description: `Overtime (2×) — ${dateLabel}`,

@@ -22,6 +22,8 @@ import { processMA000038Week } from './ma000038.engine.js'
 import { processMA000039Week } from './ma000039.engine.js'
 import { calculateAllowances } from './allowance.engine.js'
 import { checkKmFloor, buildKmFloorTopUpLine } from './kmFloorChecker.js'
+import { reconcileAnnualisedSalary } from './annualisedSalary.engine.js'
+import { assessCasualConversion } from './casualConversion.engine.js'
 import type {
   DayInput,
   EmployeeEngineInput,
@@ -31,6 +33,10 @@ import type {
   KmFloorResult,
   AwardRateContext,
   EmployeePayWeekResult,
+  AnnualisedSalaryInput,
+  AnnualisedSalaryReconciliation,
+  CasualShiftRecord,
+  CasualConversionAssessment,
 } from './types.js'
 
 // Re-export engine types for consumers who only import from award.engine
@@ -43,12 +49,18 @@ export type {
   KmFloorResult,
   AwardRateContext,
   EmployeePayWeekResult,
+  AnnualisedSalaryInput,
+  AnnualisedSalaryReconciliation,
+  CasualShiftRecord,
+  CasualConversionAssessment,
 }
 
 // Re-export pure engine functions for consumers who want to call them directly
 // (e.g., in tests, or when the context has already been loaded)
 export { processMA000038Week, processMA000039Week, calculateAllowances, checkKmFloor }
 export { loadRateContext }
+export { reconcileAnnualisedSalary }
+export { assessCasualConversion }
 
 /**
  * Process a single employee's pay week end-to-end.

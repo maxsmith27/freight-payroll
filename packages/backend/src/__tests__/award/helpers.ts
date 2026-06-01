@@ -14,6 +14,32 @@ import type { AwardRateContext, DayInput, EmployeeEngineInput } from '../../modu
 
 // ─── Mock context builders ──────────────────────────────────────────────────
 
+// MA000038 classification rates (FWO pay guide, effective 1 Jul 2025)
+export const MA000038_CLASSIFICATION_RATES = new Map<string, number>([
+  ['GRADE_1',  25.65],
+  ['GRADE_2',  26.27],
+  ['GRADE_3',  26.57],
+  ['GRADE_4',  27.04],
+  ['GRADE_5',  27.37],
+  ['GRADE_6',  27.68],
+  ['GRADE_7',  28.09],
+  ['GRADE_8',  28.90],
+  ['GRADE_9',  29.39],
+  ['GRADE_10', 30.12],
+])
+
+// MA000039 classification rates (FWO pay guide, effective 10 Oct 2025)
+export const MA000039_CLASSIFICATION_RATES = new Map<string, number>([
+  ['GRADE_3',  39.37],
+  ['GRADE_4',  40.07],
+  ['GRADE_5',  40.57],
+  ['GRADE_6',  41.03],
+  ['GRADE_7',  41.62],
+  ['GRADE_8',  42.83],
+  ['GRADE_9',  43.55],
+  ['GRADE_10', 44.63],
+])
+
 export function makeMa000038Context(overrides?: Partial<AwardRateContext>): AwardRateContext {
   return {
     baseHourlyRate:         27.04,   // MA000038 Grade 4
@@ -23,6 +49,7 @@ export function makeMa000038Context(overrides?: Partial<AwardRateContext>): Awar
     ordinaryHoursPerWeek:   ORDINARY_HOURS_PER_WEEK,
     ordinaryHoursPerDay:    ORDINARY_HOURS_PER_DAY,
     allowanceRates:         new Map(),
+    classificationRates:    MA000038_CLASSIFICATION_RATES,
     ...overrides,
   }
 }
@@ -36,6 +63,7 @@ export function makeMa000039Context(overrides?: Partial<AwardRateContext>): Awar
     ordinaryHoursPerWeek:   MA000039_ORDINARY_HOURS_PER_WEEK,
     ordinaryHoursPerDay:    MA000039_ORDINARY_HOURS_PER_WEEK / 5,
     allowanceRates:         new Map(),
+    classificationRates:    MA000039_CLASSIFICATION_RATES,
     ...overrides,
   }
 }

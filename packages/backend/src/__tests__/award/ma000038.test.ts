@@ -16,7 +16,8 @@
 
 import { describe, it, expect } from 'vitest'
 import { processMA000038Week } from '../../modules/payroll/engines/ma000038.engine.js'
-import { makeMa000038Context, makeDay, makeEmployee, round2, round4 } from './helpers.js'
+import { makeMa000038Context, makeDay, makeEmployee, round2, round4, MA000038_CLASSIFICATION_RATES } from './helpers.js'
+import type { AwardClassificationLevel } from '@freight-payroll/shared'
 
 // ─── Grade 4 base rate: $27.04/hr
 // ─── Rates used in tests:
@@ -619,5 +620,137 @@ describe('MA000038 — Edge cases', () => {
     const resultReversed = processMA000038Week(daysReversed, emp, ctx)
     expect(resultOrdered.totalGross).toBe(resultReversed.totalGross)
     expect(resultOrdered.totalOrdinaryHours).toBe(resultReversed.totalOrdinaryHours)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────
+describe('MA000038 — Higher duties (cl.34)', () => {
+  // Employee is Grade 4 ($27.04/hr). Grade 5 award minimum: $27.37/hr.
+  // When the employee performs Grade 5 duties for >2 hours in a day,
+  // the WHOLE day elevates to the Grade 5 award minimum rate.
+
+  it('higher duty day elevates base rate to higher grade award minimum', () => {
+    const hdCtx = makeMa000038Context({ classificationRates: MA000038_CLASSIFICATION_RATES })
+    const hdDay = {
+      ...makeDay(MON, 7, 15, 24),
+      isHigherDutyDay: true,
+      higherDutyGrade: 'GRADE_5' as AwardClassificationLevel,
+    }
+    const result = processMA000038Week([hdDay], emp, hdCtx)
+    const ordLine = result.lines.find(l => l.earningType === 'ORDINARY')
+    // Grade 5 award minimum = $27.37
+    expect(ordLine?.rate).toBe(27.37)
+    expect(round2(ordLine?.amount ?? 0)).toBe(round2(7.6 * 27.37))
+  })
+
+  it('higher duty overtime rate is also elevated', () => {
+    // 10h on a higher-duty day: Grade 5 rate for all hours
+    const hdCtx = makeMa000038Context({ classificationRates: MA000038_CLASSIFICATION_RATES })
+    const hdDay = {
+      ...makeDay(MON, 7, 17, 0),   // 10h, no break
+      isHigherDutyDay: true,
+      higherDutyGrade: 'GRADE_5' as AwardClassificationLevel,
+    }
+    const result = processMA000038Week([hdDay], emp, hdCtx)
+    const ot1 = result.lines.find(l => l.earningType === 'OVERTIME_1_5X')
+    // OT rate = Grade 5 base ($27.37) × 1.5
+    expect(ot1?.rate).toBe(round4(27.37 * 1.5))
+  })
+
+  it('higher duty does not reduce rate if employee is already paid above higher grade minimum', () => {
+    // Employee paid $35/hr; Grade 5 minimum is $27.37 → employee rate wins
+    const aboveAwardCtx = makeMa000038Context({
+      baseHourlyRate:         35.00,
+      awardMinimumHourlyRate: 27.04,
+      classificationRates:    MA000038_CLASSIFICATION_RATES,
+    })
+    const aboveAwardEmp = makeEmployee({ hourlyRate: 35.00 })
+    const hdDay = {
+      ...makeDay(MON, 7, 15, 24),
+      isHigherDutyDay: true,
+      higherDutyGrade: 'GRADE_5' as AwardClassificationLevel,
+    }
+    const result = processMA000038Week([hdDay], aboveAwardEmp, aboveAwardCtx)
+    const ordLine = result.lines.find(l => l.earningType === 'ORDINARY')
+    expect(ordLine?.rate).toBe(35.00)   // own rate is higher → no change
+  })
+
+  it('non-higher-duty day uses the standard rate even when another day has higher duties', () => {
+    // Day 1 (Mon): higher duties at Grade 5 → $27.37
+    // Day 2 (Tue): normal Grade 4 → $27.04
+    const hdCtx = makeMa000038Context({ classificationRates: MA000038_CLASSIFICATION_RATES })
+    const hdDay  = { ...makeDay(MON, 7, 15, 24), isHigherDutyDay: true, higherDutyGrade: 'GRADE_5' as AwardClassificationLevel }
+    const normDay = makeDay(TUE, 7, 15, 24)
+    const result = processMA000038Week([hdDay, normDay], emp, hdCtx)
+
+    const monLine = result.lines.find(l => l.description.includes('Mon'))
+    const tueLine = result.lines.find(l => l.description.includes('Tue'))
+    expect(monLine?.rate).toBe(27.37)   // Grade 5 rate
+    expect(tueLine?.rate).toBe(27.04)   // Grade 4 rate
+  })
+
+  it('higher duty with unknown grade leaves rate unchanged', () => {
+    // If classificationRates doesn't have the higher grade, rate stays the same
+    const smallCtx = makeMa000038Context({
+      classificationRates: new Map([['GRADE_4', 27.04]]),  // Grade 5 not present
+    })
+    const hdDay = {
+      ...makeDay(MON, 7, 15, 24),
+      isHigherDutyDay: true,
+      higherDutyGrade: 'GRADE_5' as AwardClassificationLevel,
+    }
+    const result = processMA000038Week([hdDay], emp, smallCtx)
+    const ordLine = result.lines.find(l => l.earningType === 'ORDINARY')
+    expect(ordLine?.rate).toBe(27.04)   // falls back to Grade 4
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────
+describe('MA000038 — Mid-period birthday splitting', () => {
+  // The engine uses day.date (not emp.periodStart) to compute age,
+  // so a birthday mid-week correctly splits the rate between days.
+
+  it('employee turning 20 mid-week: rate changes from 90% to adult on birthday', () => {
+    // Born 2005-07-08. Turns 20 on TUE 8 Jul 2025 (adult rate from that day).
+    // MON 2025-07-07: still 19 (birthday not yet) → 90% of $27.04 = $24.336
+    // TUE 2025-07-08: age 20 → adult rate $27.04
+    const dob    = new Date('2005-07-08')
+    const jrEmp  = makeEmployee({ dateOfBirth: dob })
+    const days   = [makeDay(MON, 7, 15, 24), makeDay(TUE, 7, 15, 24)]
+    const result = processMA000038Week(days, jrEmp, ctx)
+
+    const monLine = result.lines.find(l => l.description.includes('Mon'))
+    const tueLine = result.lines.find(l => l.description.includes('Tue'))
+
+    expect(monLine?.rate).toBe(round4(27.04 * 0.9))   // 19 → 90%
+    expect(tueLine?.rate).toBe(27.04)                   // 20 → adult
+  })
+
+  it('employee turning 19 mid-week: rate steps up from 80% to 90% on birthday', () => {
+    // Born 2006-07-09. Turns 19 on WED 9 Jul 2025.
+    // MON: age 18 → 80%
+    // WED: age 19 → 90%
+    const dob    = new Date('2006-07-09')
+    const jrEmp  = makeEmployee({ dateOfBirth: dob })
+    const days   = [makeDay(MON, 7, 15, 24), makeDay(WED, 7, 15, 24)]
+    const result = processMA000038Week(days, jrEmp, ctx)
+
+    const monLine = result.lines.find(l => l.description.includes('Mon'))
+    const wedLine = result.lines.find(l => l.description.includes('Wed'))
+
+    expect(monLine?.rate).toBe(round4(27.04 * 0.8))   // 18 → 80%
+    expect(wedLine?.rate).toBe(round4(27.04 * 0.9))   // 19 → 90%
+  })
+
+  it('junior OT rate also uses the per-day multiplier', () => {
+    // Employee born 2005-07-08, turns 20 on TUE 8 Jul 2025.
+    // Monday (still 19): OT rate = $27.04 × 0.9 × 1.5
+    const dob    = new Date('2005-07-08')
+    const jrEmp  = makeEmployee({ dateOfBirth: dob })
+    const days   = [makeDay(MON, 7, 18, 0)]  // 11h, no break → 7.6 ord + 3.4 OT
+    const result = processMA000038Week(days, jrEmp, ctx)
+
+    const ot1 = result.lines.find(l => l.earningType === 'OVERTIME_1_5X')
+    expect(ot1?.rate).toBe(round4(27.04 * 0.9 * 1.5))
   })
 })

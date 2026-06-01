@@ -51,6 +51,14 @@ export interface AwardRateContext {
    * Loaded from the DB by rateLoader; passed into calculateAllowances().
    */
   allowanceRates: ReadonlyMap<string, LoadedAllowanceRate>
+
+  /**
+   * Award minimum hourly rates for every classification level of this award
+   * at the pay period date. Used by the higher duties handler to look up the
+   * rate for the elevated grade without an extra DB call.
+   * Keyed by AwardClassificationLevel.
+   */
+  classificationRates: ReadonlyMap<AwardClassificationLevel, number>
 }
 
 // ─── Input types ─────────────────────────────────────────────────────────────
@@ -202,6 +210,104 @@ export interface RequestedAllowance {
   quantity: number
   /** Optional description override for the earning line. */
   description?: string
+}
+
+// ─── Annualised salary reconciliation ────────────────────────────────────────
+
+/**
+ * Input for an annualised salary reconciliation.
+ * Used when an employee is on a formal annualised salary agreement (ASA)
+ * under MA000038 cl.17 or MA000039 equivalent.
+ */
+export interface AnnualisedSalaryInput {
+  /** The agreed annual salary (gross, before tax). */
+  annualisedSalaryPerAnnum: number
+
+  /** Pre-computed award earnings for each week in the reconciliation period. */
+  weeklyResults: WeeklyAwardResult[]
+
+  /**
+   * Number of calendar days in the reconciliation period.
+   * Used to prorate the annual salary: proratedSalary = salary × (days / 365).
+   * Defaults to 365 if not provided (full year).
+   */
+  periodDays?: number
+}
+
+export interface AnnualisedSalaryReconciliation {
+  /** Calendar days covered by this reconciliation. */
+  periodDays: number
+
+  /** Total of what the award would have paid across all weeks. */
+  totalAwardEarnings: number
+
+  /** Prorated salary paid for this period. */
+  totalSalaryPaid: number
+
+  /**
+   * Amount the annualised salary exceeded award earnings (positive = compliant surplus).
+   * Negative means a shortfall (non-compliant).
+   */
+  surplus: number
+
+  /** Shortfall the employer must top up (0 if compliant). */
+  shortfall: number
+
+  /** True if annualised salary covered all award entitlements. */
+  isCompliant: boolean
+
+  /** Per-week breakdown for audit trail. */
+  weeklyBreakdown: Array<{
+    weekIndex: number
+    awardEarnings: number
+    salaryEquivalent: number
+    weekSurplus: number
+  }>
+}
+
+// ─── Casual conversion monitor ────────────────────────────────────────────────
+
+export interface CasualShiftRecord {
+  /** Date of the shift. */
+  date: Date
+  /** Hours worked (net of breaks). */
+  hoursWorked: number
+}
+
+/**
+ * Result of assessing a casual employee's conversion eligibility.
+ * MA000038 cl.10.3 / NES casual conversion provisions.
+ */
+export interface CasualConversionAssessment {
+  /** True if the employee has worked ≥ 12 months and meets the regular/systematic test. */
+  isEligible: boolean
+
+  /** Months since the first shift in the provided history. */
+  monthsEmployed: number
+
+  /**
+   * Regularity score 0–100.
+   * 100 = perfectly consistent same days every week.
+   * Below 50 = irregular pattern, conversion less likely to be required.
+   */
+  regularityScore: number
+
+  /** Median days worked per week over the assessment period. */
+  typicalDaysPerWeek: number
+
+  /** Median hours worked per week over the assessment period. */
+  typicalHoursPerWeek: number
+
+  /**
+   * Whether the employer is required to proactively offer conversion.
+   * True when isEligible AND regularity indicates regular/systematic engagement.
+   */
+  shouldOfferConversion: boolean
+
+  /**
+   * Human-readable summary of the assessment result.
+   */
+  summary: string
 }
 
 export interface AllowanceLine {

@@ -150,21 +150,7 @@ export function processMA000038Week(
 ): WeeklyAwardResult {
   const lines: EarningLine[] = []
 
-  // ── Effective base rate ───────────────────────────────────────────────────
-  // Apply junior rate multiplier if applicable
-  let baseRate = ctx.baseHourlyRate
-
-  if (emp.dateOfBirth) {
-    const age = ageAtDate(emp.dateOfBirth, emp.periodStart)
-    const juniorMultiplier = getJuniorRateMultiplier(age)
-    baseRate = r(baseRate * juniorMultiplier)
-  }
-
-  // Apply casual loading to the base rate
   const isCasual = emp.employmentType === 'CASUAL'
-  if (isCasual) {
-    baseRate = r(baseRate * (1 + CASUAL_LOADING))
-  }
 
   // ── Week-level tracking ───────────────────────────────────────────────────
   let weeklyOrdinaryHoursAccumulated = 0
@@ -183,15 +169,38 @@ export function processMA000038Week(
 
     if (rawHours <= 0) continue
 
-    // ── Higher duties: elevate base rate for this day if applicable ──────
-    let dayBaseRate = baseRate
+    // ── Per-day effective base rate ───────────────────────────────────────
+    // Computed inside the loop so that:
+    //   1. Junior rates split correctly at the employee's birthday mid-period.
+    //   2. Higher duties elevate the rate for individual days.
+
+    // Start from the loaded base rate for the employee's own grade.
+    let dayBaseRate = ctx.baseHourlyRate
+
+    // 1. Junior rate — use age on THIS day so a birthday mid-week splits correctly.
+    let juniorMultiplier = 1.0
+    if (emp.dateOfBirth) {
+      const age = ageAtDate(emp.dateOfBirth, day.date)
+      juniorMultiplier = getJuniorRateMultiplier(age)
+      dayBaseRate = r(dayBaseRate * juniorMultiplier)
+    }
+
+    // 2. Higher duties — if the employee performed duties above their grade for
+    //    the whole day (>2hrs at higher grade triggers whole-day elevation per award),
+    //    elevate to the award minimum for the higher grade × any junior multiplier.
     if (day.isHigherDutyDay && day.higherDutyGrade) {
-      // The higher-duty rate for this specific day.
-      // In production, this would use ctx for the higher grade; for now we
-      // flag it so the caller can pass the correct rate via ctx.baseHourlyRate
-      // override. Higher duties are applied externally before calling this engine.
-      // (ctx.baseHourlyRate should already be the higher rate if isHigherDutyDay is set.)
-      dayBaseRate = baseRate  // Trust that caller set the correct rate in ctx
+      const higherGradeMin = ctx.classificationRates.get(day.higherDutyGrade)
+      if (higherGradeMin !== undefined) {
+        const higherEffective = r(higherGradeMin * juniorMultiplier)
+        if (higherEffective > dayBaseRate) {
+          dayBaseRate = higherEffective
+        }
+      }
+    }
+
+    // 3. Casual loading — applied after junior/higher-duties so it stacks correctly.
+    if (isCasual) {
+      dayBaseRate = r(dayBaseRate * (1 + CASUAL_LOADING))
     }
 
     // ── Minimum engagement ────────────────────────────────────────────────
